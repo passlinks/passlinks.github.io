@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -72,7 +73,7 @@ password at the site itself. Make it long.
 </p>
 
 <p class="note">
-AES-256-GCM keyed by PBKDF2-SHA256 at 600k iterations, with a fresh random salt in every
+AES-256-GCM keyed by PBKDF2-SHA256 at 3M iterations, over a random salt carried in the
 string, all in your browser. When sharing a link, send the master password through a
 different channel.
 </p>
@@ -83,8 +84,9 @@ const $ = id => document.getElementById(id);
 const enc = new TextEncoder(), dec = new TextDecoder();
 const master = $('master'), pw = $('pw'), secret = $('secret'), cipher = $('cipher');
 
-const NONCE = 12;    // one random value serves as both the PBKDF2 salt and the GCM IV
-const TAG   = 128;   // GCM tag in bits
+const SALT = 12, IV = 12;   // salt and IV are separate so the derived key can be cached:
+const TAG  = 128;           // the salt holds still while a fresh IV goes into every string
+const ITERATIONS = 3000000;
 
 const b64 = {
   e: buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''),
@@ -98,11 +100,21 @@ const cat = (...parts) => {
   return out;
 };
 
-const key = salt => crypto.subtle
-  .importKey('raw', enc.encode(master.value), 'PBKDF2', false, ['deriveKey'])
-  .then(k => crypto.subtle.deriveKey(
-    { name:'PBKDF2', salt, iterations:600000, hash:'SHA-256' }, k,
-    { name:'AES-GCM', length:256 }, false, ['encrypt','decrypt']));
+/* Three million iterations is a fifth of a second, paid once: the result is kept for as
+   long as the master password and the salt both hold still, so typing stays instant. */
+const same = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
+let cache = null;
+
+async function key(salt){
+  const pwd = master.value;
+  if (cache && cache.pwd === pwd && same(cache.salt, salt)) return cache.key;
+  const raw = await crypto.subtle.importKey('raw', enc.encode(pwd), 'PBKDF2', false, ['deriveKey']);
+  const derived = await crypto.subtle.deriveKey(
+    { name:'PBKDF2', salt, iterations:ITERATIONS, hash:'SHA-256' }, raw,
+    { name:'AES-GCM', length:256 }, false, ['encrypt','decrypt']);
+  cache = { pwd, salt: salt.slice(), key: derived };
+  return derived;
+}
 
 /* Base32 (RFC 4648, no padding) — every 8 chars of a 2FA secret pack into 5 bytes. */
 const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
@@ -195,6 +207,7 @@ function generate(n){
   }
 }
 
+let salt = crypto.getRandomValues(new Uint8Array(SALT));
 let quiet = false, timer;
 
 const status = (msg, cls) => { $('status').textContent = msg; $('status').className = cls || ''; };
@@ -213,9 +226,9 @@ async function encrypt(){
   let body;
   try { body = pack(); }
   catch { return status(`Password is too long (max ${PWMAX} bytes)`, 'err'); }
-  const nonce = crypto.getRandomValues(new Uint8Array(NONCE));   // fresh every time — never reuse a GCM IV
-  const ct = await crypto.subtle.encrypt({ name:'AES-GCM', iv:nonce, tagLength:TAG }, await key(nonce), body);
-  const blob = b64.e(cat(nonce, new Uint8Array(ct)));
+  const iv = crypto.getRandomValues(new Uint8Array(IV));   // fresh every time — never reuse a GCM IV
+  const ct = await crypto.subtle.encrypt({ name:'AES-GCM', iv, tagLength:TAG }, await key(salt), body);
+  const blob = b64.e(cat(salt, iv, new Uint8Array(ct)));
   quiet = true; cipher.value = blob; quiet = false;
   mark('ok'); setHash(blob); status('Encrypted', 'ok');
 }
@@ -228,11 +241,13 @@ async function decrypt(){
   try {
     if (!/^[A-Za-z0-9_-]+$/.test(blob)) throw 'FORMAT';
     const raw = b64.d(blob);
-    if (raw.length < NONCE + TAG / 8 + 1) throw 'FORMAT';
-    const nonce = raw.subarray(0, NONCE);
+    if (raw.length < SALT + IV + TAG / 8 + 1) throw 'FORMAT';
+    const s = raw.subarray(0, SALT);
     const pt = await crypto.subtle.decrypt(
-      { name:'AES-GCM', iv:nonce, tagLength:TAG }, await key(nonce), raw.subarray(NONCE));
+      { name:'AES-GCM', iv: raw.subarray(SALT, SALT + IV), tagLength:TAG },
+      await key(s), raw.subarray(SALT + IV));
     const data = unpack(new Uint8Array(pt));
+    salt = s.slice();   // adopt it, so editing what we just opened reuses the cached key
     quiet = true; pw.value = data.p; secret.value = data.s; quiet = false;
     mark('ok'); setHash(blob); status('Decrypted', 'ok'); tick();
   } catch (e){
@@ -282,6 +297,8 @@ $('clear').addEventListener('click', () => {
   quiet = true;
   master.value = pw.value = secret.value = cipher.value = '';
   quiet = false;
+  cache = null;
+  salt = crypto.getRandomValues(new Uint8Array(SALT));
   mark(); setHash(''); status('Cleared', 'ok'); tick(); master.focus();
 });
 
