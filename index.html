@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'; form-action 'none'; base-uri 'none'">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<title>Passlink</title>
+<style>
+*{box-sizing:border-box}
+body{max-width:560px;margin:0 auto;padding:32px 16px 64px;background:#fff;color:#111;
+     font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+h1{font-size:18px;margin:0 0 20px}
+label{display:block;font-size:12px;font-weight:600;color:#666;margin:16px 0 5px}
+input,textarea{width:100%;padding:9px 11px;border:1px solid #ccc;border-radius:6px;
+               font-size:14px;font-family:ui-monospace,Menlo,Consolas,monospace;background:#fff;color:#111}
+input:focus,textarea:focus{outline:2px solid #2a5bd7;outline-offset:-1px;border-color:#2a5bd7}
+textarea{resize:vertical;min-height:60px;word-break:break-all}
+textarea.ok{border-color:#0f7b4f}
+textarea.err{border-color:#b32020}
+button{margin-top:12px;margin-right:6px;padding:9px 14px;border:1px solid #ccc;border-radius:6px;
+       background:#fff;color:#111;font-size:13px;font-family:inherit;cursor:pointer}
+button:hover{border-color:#2a5bd7}
+.row{display:flex;align-items:flex-end;justify-content:space-between;gap:12px}
+.row label{margin-bottom:5px}
+button.mini{margin:0 0 5px;padding:3px 9px;font-size:11px}
+#code{font:600 26px/1 ui-monospace,Menlo,Consolas,monospace;letter-spacing:.1em;color:#0f7b4f;margin-top:8px}
+#code.bad{font-size:13px;font-weight:400;letter-spacing:0;color:#b32020}
+#secs{font-size:12px;color:#666;margin-top:4px}
+#status{font-size:12px;color:#666;margin-top:8px;min-height:18px}
+#status.ok{color:#0f7b4f}
+#status.err{color:#b32020}
+p.note{font-size:12px;color:#666;line-height:1.55;margin-top:28px}
+</style>
+</head>
+<body>
+
+<h1>Passlink</h1>
+
+<label for="master">Master password</label>
+<input id="master" type="password" autocomplete="off" spellcheck="false">
+
+<div class="row">
+  <label for="pw">Password</label>
+  <button id="genpw" class="mini" type="button">Generate 20 chars</button>
+</div>
+<input id="pw" type="text" autocomplete="off" spellcheck="false">
+
+<label for="secret">2FA secret</label>
+<input id="secret" type="text" autocomplete="off" spellcheck="false" placeholder="NEUT QBLB 4LXU …">
+
+<div id="code" hidden>— — —</div>
+<div id="secs" hidden></div>
+
+<label for="cipher">Encrypted string</label>
+<textarea id="cipher" autocomplete="off" spellcheck="false" placeholder="Generated as you type above, or paste one here to unlock."></textarea>
+<div id="status"></div>
+<button id="copyLink" type="button">Copy link</button>
+<button id="clear" type="button">Clear</button>
+
+<p class="note">
+Type a password and a 2FA secret; both are encrypted into the string below and parked
+after the <code>#</code> in the URL, where browsers never send it to a server.
+Nothing is kept here — you keep the string.
+</p>
+
+<p class="note">
+The master password is all that protects it. Anyone holding the string can guess at it
+offline, forever, with no rate limit and no way to revoke: if it leaks, change the
+password at the site itself. Make it long.
+</p>
+
+<p class="note">
+AES-256-GCM keyed by PBKDF2-SHA256 at 600k iterations, with a fresh random salt in every
+string, all in your browser. When sharing a link, send the master password through a
+different channel.
+</p>
+
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const enc = new TextEncoder(), dec = new TextDecoder();
+const master = $('master'), pw = $('pw'), secret = $('secret'), cipher = $('cipher');
+
+const NONCE = 12;    // one random value serves as both the PBKDF2 salt and the GCM IV
+const TAG   = 128;   // GCM tag in bits
+
+const b64 = {
+  e: buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''),
+  d: str => { const s = str.replace(/-/g,'+').replace(/_/g,'/');
+              return Uint8Array.from(atob(s + '='.repeat((4 - s.length % 4) % 4)), c => c.charCodeAt(0)); }
+};
+
+const cat = (...parts) => {
+  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  let i = 0; for (const p of parts){ out.set(p, i); i += p.length; }
+  return out;
+};
+
+const key = salt => crypto.subtle
+  .importKey('raw', enc.encode(master.value), 'PBKDF2', false, ['deriveKey'])
+  .then(k => crypto.subtle.deriveKey(
+    { name:'PBKDF2', salt, iterations:600000, hash:'SHA-256' }, k,
+    { name:'AES-GCM', length:256 }, false, ['encrypt','decrypt']));
+
+/* Base32 (RFC 4648, no padding) — every 8 chars of a 2FA secret pack into 5 bytes. */
+const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+const b32 = {
+  norm: s => s.toUpperCase().replace(/[\s-]/g,'').replace(/=+$/,''),
+  d: s => {
+    let bits = 0, val = 0; const out = [];
+    for (const c of s){
+      const i = B32.indexOf(c);
+      if (i < 0) throw 0;
+      val = (val << 5) | i; bits += 5;
+      if (bits >= 8) out.push((val >>> (bits -= 8)) & 0xff);
+    }
+    return new Uint8Array(out);
+  },
+  e: bytes => {
+    let bits = 0, val = 0, out = '';
+    for (const b of bytes){
+      val = (val << 8) | b; bits += 8;
+      while (bits >= 5) out += B32[(val >>> (bits -= 5)) & 31];
+    }
+    return bits ? out + B32[(val << (5 - bits)) & 31] : out;
+  }
+};
+
+/* TOTP — HMAC-SHA1, 6 digits, 30s (RFC 6238) */
+async function totp(raw){
+  const bytes = b32.d(b32.norm(raw));
+  if (!bytes.length) throw 0;
+  const counter = Math.floor(Date.now() / 30000);
+  const msg = new DataView(new ArrayBuffer(8));
+  msg.setUint32(0, Math.floor(counter / 4294967296));
+  msg.setUint32(4, counter >>> 0);
+  const k = await crypto.subtle.importKey('raw', bytes, { name:'HMAC', hash:'SHA-1' }, false, ['sign']);
+  const mac = new Uint8Array(await crypto.subtle.sign('HMAC', k, msg.buffer));
+  const o = mac[19] & 0x0f;
+  const n = ((mac[o] & 0x7f) << 24) | (mac[o+1] << 16) | (mac[o+2] << 8) | mac[o+3];
+  return String(n % 1000000).padStart(6, '0');
+}
+
+/* Plaintext body — one header byte, then the two fields back to back:
+     [0]       bit 7    the secret is stored as packed Base32 bytes, not as text
+               bits 0-6 length of the password in bytes
+     [1 ..]    password, UTF-8
+     [.. end]  secret */
+const PACKED = 0x80, PWMAX = 0x7f;
+
+function pack(){
+  const pwBytes = enc.encode(pw.value);
+  if (pwBytes.length > PWMAX) throw 'PWLEN';
+  let head = pwBytes.length, sec = enc.encode(secret.value);
+  const norm = b32.norm(secret.value);
+  if (norm){
+    try {
+      const bytes = b32.d(norm);
+      if (b32.e(bytes) === norm){ head |= PACKED; sec = bytes; }   // only pack when it round-trips exactly
+    } catch { /* not Base32 — keep the text as typed */ }
+  }
+  return cat(new Uint8Array([head]), pwBytes, sec);
+}
+
+function unpack(body){
+  const pwLen = body[0] & PWMAX;
+  if (!body.length || 1 + pwLen > body.length) throw 'FORMAT';
+  const sec = body.subarray(1 + pwLen);
+  return {
+    p: dec.decode(body.subarray(1, 1 + pwLen)),
+    s: body[0] & PACKED ? b32.e(sec) : dec.decode(sec)
+  };
+}
+
+/* 75 symbols over 20 characters — a shade under 125 bits. */
+const PW_LEN = 20;
+const PW_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*-_=+?';
+const PW_CLASSES = [/[a-z]/, /[A-Z]/, /[0-9]/, /[^A-Za-z0-9]/];
+
+function generate(n){
+  const limit = 256 - 256 % PW_ALPHABET.length;   // drop the short tail, else the first
+  const buf = new Uint8Array(n * 2);              // few symbols would come up more often
+  for (;;){
+    let out = '';
+    while (out.length < n){
+      crypto.getRandomValues(buf);
+      for (const b of buf){
+        if (out.length === n) break;
+        if (b < limit) out += PW_ALPHABET[b % PW_ALPHABET.length];
+      }
+    }
+    if (PW_CLASSES.every(re => re.test(out))) return out;   // one of each class, or draw again
+  }
+}
+
+let quiet = false, timer;
+
+const status = (msg, cls) => { $('status').textContent = msg; $('status').className = cls || ''; };
+const mark = cls => { cipher.className = cls || ''; };
+const setHash = v => history.replaceState(null, '', location.pathname + (v ? '#' + v : ''));
+/* Served from the root of a domain the path is just "/", and dropping it saves a character. */
+const link = blob => location.origin + (location.pathname === '/' ? '' : location.pathname) + '#' + blob;
+
+async function encrypt(){
+  if (!pw.value && !secret.value){
+    quiet = true; cipher.value = ''; quiet = false;
+    mark(); setHash(''); status(''); return;
+  }
+  if (!master.value) return status('Enter a master password to encrypt');
+  status('Encrypting…');
+  let body;
+  try { body = pack(); }
+  catch { return status(`Password is too long (max ${PWMAX} bytes)`, 'err'); }
+  const nonce = crypto.getRandomValues(new Uint8Array(NONCE));   // fresh every time — never reuse a GCM IV
+  const ct = await crypto.subtle.encrypt({ name:'AES-GCM', iv:nonce, tagLength:TAG }, await key(nonce), body);
+  const blob = b64.e(cat(nonce, new Uint8Array(ct)));
+  quiet = true; cipher.value = blob; quiet = false;
+  mark('ok'); setHash(blob); status('Encrypted', 'ok');
+}
+
+async function decrypt(){
+  const blob = cipher.value.trim();
+  if (!blob){ mark(); setHash(''); status(''); return; }
+  if (!master.value) return status('Enter a master password to decrypt');
+  status('Decrypting…');
+  try {
+    if (!/^[A-Za-z0-9_-]+$/.test(blob)) throw 'FORMAT';
+    const raw = b64.d(blob);
+    if (raw.length < NONCE + TAG / 8 + 1) throw 'FORMAT';
+    const nonce = raw.subarray(0, NONCE);
+    const pt = await crypto.subtle.decrypt(
+      { name:'AES-GCM', iv:nonce, tagLength:TAG }, await key(nonce), raw.subarray(NONCE));
+    const data = unpack(new Uint8Array(pt));
+    quiet = true; pw.value = data.p; secret.value = data.s; quiet = false;
+    mark('ok'); setHash(blob); status('Decrypted', 'ok'); tick();
+  } catch (e){
+    mark('err');
+    status(e === 'FORMAT' ? 'Malformed string' : 'Wrong master password, or the string is corrupt', 'err');
+  }
+}
+
+const run = fn => { if (!quiet){ clearTimeout(timer); timer = setTimeout(fn, 400); } };
+[pw, secret].forEach(el => el.addEventListener('input', () => { run(encrypt); tick(); }));
+cipher.addEventListener('input', () => run(decrypt));
+master.addEventListener('input', () =>
+  run(cipher.value.trim() && !pw.value && !secret.value ? decrypt : encrypt));
+
+async function tick(){
+  const raw = secret.value.trim();
+  $('code').hidden = $('secs').hidden = !raw;
+  if (!raw) return;
+  $('secs').textContent = (30 - Math.floor(Date.now() / 1000 % 30)) + 's left';
+  try {
+    const c = await totp(raw);
+    $('code').className = '';
+    $('code').textContent = c.slice(0,3) + ' ' + c.slice(3);
+  } catch {
+    $('code').className = 'bad';
+    $('code').textContent = 'Not a valid Base32 secret';
+  }
+}
+setInterval(tick, 1000);
+
+$('genpw').addEventListener('click', () => {
+  pw.value = generate(PW_LEN);
+  clearTimeout(timer);
+  encrypt();
+});
+
+$('copyLink').addEventListener('click', e => {
+  const blob = cipher.value.trim();
+  if (!blob) return status('Nothing to share yet', 'err');
+  navigator.clipboard.writeText(link(blob));
+  e.target.textContent = 'Copied';
+  setTimeout(() => { e.target.textContent = 'Copy link'; }, 1000);
+});
+
+$('clear').addEventListener('click', () => {
+  clearTimeout(timer);
+  quiet = true;
+  master.value = pw.value = secret.value = cipher.value = '';
+  quiet = false;
+  mark(); setHash(''); status('Cleared', 'ok'); tick(); master.focus();
+});
+
+if (!crypto.subtle){
+  status('This browser has no Web Crypto — open the page over HTTPS', 'err');
+} else if (location.hash.length > 1){
+  cipher.value = location.hash.slice(1).trim();
+  status('This link holds data — enter the master password to unlock');
+  master.focus();
+}
+</script>
+</body>
+</html>
