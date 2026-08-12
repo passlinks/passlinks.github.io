@@ -155,13 +155,12 @@ pl-qr .body{display:flex;flex-direction:column;align-items:center;gap:18px;
 /* The symbol stays dark-on-white in both themes: an inverted QR scans on some
    readers and not others, and this one has to work the first time.
 
-   Full-bleed on purpose, and the one element allowed to break the --inner
-   alignment: this is a target for a camera, not a column of text, and every
-   pixel of width comes back as pixels per module. align-self:stretch plus a
-   negative gutter margin spans --page on a wide screen and the whole viewport
-   on a phone. No padding — the SVG's own 4-module white border is the quiet
-   zone, so padding here would only shrink the symbol. */
-pl-qr .plate{align-self:stretch;margin:0 calc(var(--gutter) * -1);
+   280px is chosen against a measured floor, not by eye: ZXing — the engine most
+   phone scanners are built on — reads this rendering down to 3 px/module and
+   fails at 2. A 116-character link is version 7, so 280px gives 5.3 px/module,
+   roughly 1.8x the floor. No padding: the SVG carries its own 4-module white
+   quiet zone, so padding here would only shrink the symbol inside the box. */
+pl-qr .plate{width:100%;max-width:280px;
   background:#fff;border-radius:16px;overflow:hidden;
   box-shadow:0 4px 24px rgba(0,0,0,.16)}
 pl-qr svg{display:block;width:100%;height:auto}
@@ -644,8 +643,12 @@ const QR = (() => {
       row reads, which is what makes the two directions render identically.
    ═══════════════════════════════════════════════════════════════════════════ */
 
-const href = blob =>
-  location.origin + (location.pathname === '/' ? '' : location.pathname) + '#' + blob;
+/* The path is always kept, even when it is the bare "/" at a domain root. The
+   original saved that one character, but "https://host#fragment" — legal per
+   RFC 3986, where the path may be empty — is rejected by plenty of phone URL
+   detectors, which is what a scanner means when it decodes a QR and then
+   reports the content as unsupported. One character is not worth that. */
+const href = blob => location.origin + location.pathname + '#' + blob;
 const setHash = v =>
   history.replaceState(null, '', location.pathname + (v ? '#' + v : ''));
 
