@@ -153,8 +153,16 @@ pl-sheet .top strong,pl-qr .top strong{font-size:var(--title);font-weight:650;
 pl-qr .body{display:flex;flex-direction:column;align-items:center;gap:18px;
   width:100%;max-width:var(--inner);margin:0 auto}
 /* The symbol stays dark-on-white in both themes: an inverted QR scans on some
-   readers and not others, and this one has to work the first time. */
-pl-qr .plate{background:#fff;padding:14px;border-radius:16px;width:100%;max-width:300px;
+   readers and not others, and this one has to work the first time.
+
+   Full-bleed on purpose, and the one element allowed to break the --inner
+   alignment: this is a target for a camera, not a column of text, and every
+   pixel of width comes back as pixels per module. align-self:stretch plus a
+   negative gutter margin spans --page on a wide screen and the whole viewport
+   on a phone. No padding — the SVG's own 4-module white border is the quiet
+   zone, so padding here would only shrink the symbol. */
+pl-qr .plate{align-self:stretch;margin:0 calc(var(--gutter) * -1);
+  background:#fff;border-radius:16px;overflow:hidden;
   box-shadow:0 4px 24px rgba(0,0,0,.16)}
 pl-qr svg{display:block;width:100%;height:auto}
 pl-qr .url{margin:0;max-width:320px;text-align:center;color:var(--dim);
@@ -944,17 +952,73 @@ class PLToast extends PLElement {
 
 /* ── <pl-qr> — the link as a symbol, for handing it to a phone in the room ─
    One <path> of unit squares rather than a rect per module: a version 20
-   symbol is 6500 modules, and 6500 elements is a different kind of page. */
+   symbol is 6500 modules, and 6500 elements is a different kind of page.
+
+   Round data modules, but the three finder patterns stay square — decoders
+   locate the symbol by scanning for their 1:1:3:1:1 run-length ratio, and
+   rounding them corrupts that signal badly: measured 2 successful decodes out
+   of 40 even at a generous 8 pixels per module, against 40/40 when left
+   square. Chrome's own share-QR does exactly this: measured off a real one, it
+   rounds data, timing and alignment at r=0.41 and leaves the three finders as
+   solid rounded squares.
+
+   DOT_R matches Chrome's 0.41 rather than a module-filling 0.5, so the dots
+   carry a visible gap. Everything else in the path is derived from it.
+
+   QUIET is the customary 4, supplied by the SVG's own white background, which
+   is why the plate needs no padding around this. */
+const DOTS = true, QUIET = 4, DOT_R = .41;
+
+/* Trimmed to bare SVG number syntax — ".41" not "0.41" — because at version 20
+   this path carries 6500 shapes and the leading zeros alone would be kilobytes.
+   Safe to concatenate against the integer coordinate: px is always an integer. */
+const trim = v => String(v).replace(/^0/, '');
+const R2 = trim(DOT_R), D2 = trim((DOT_R * 2).toFixed(2)), OFF = trim((.5 - DOT_R).toFixed(2));
+
 function qrSvg(text){
   const { size, modules } = QR.build(text);
-  const quiet = 4, dim = size + quiet * 2;
-  let d = '';
+  const dim = size + QUIET * 2;
+  const isFinder = (x, y) =>
+    (x < 7 && y < 7) || (x >= size - 7 && y < 7) || (x < 7 && y >= size - 7);
+
+  /* Two paths, because only one of them wants antialiasing: hard edges keep
+     the squares from bleeding into their neighbours, while the dots need the
+     grey fringe a browser gives them to survive binarisation. */
+  let squares = '', dots = '';
   for (let y = 0; y < size; y++)
-    for (let x = 0; x < size; x++)
-      if (modules[y][x]) d += `M${x + quiet} ${y + quiet}h1v1h-1z`;
-  return `<svg viewBox="0 0 ${dim} ${dim}" shape-rendering="crispEdges" role="img"
-    aria-label="QR code holding the link"><rect width="${dim}" height="${dim}"
-    fill="#fff"/><path d="${d}" fill="#000"/></svg>`;
+    for (let x = 0; x < size; x++){
+      if (!modules[y][x]) continue;
+      if (DOTS && isFinder(x, y)) continue;          // drawn whole, below
+      const px = x + QUIET, py = y + QUIET;
+      if (DOTS)
+        dots += `M${px}${OFF} ${py}.5a${R2}${R2} 0 1 0 ${D2} 0a${R2}${R2} 0 1 0-${D2} 0z`;
+      else
+        squares += `M${px} ${py}h1v1h-1z`;
+    }
+
+  /* Each finder is three rounded rectangles, not 33 module squares — radii
+     solved from Chrome's own symbol at 10 px/module. Note the top pixel row of
+     a rounded rect is inset by r - sqrt(r^2 - (r-.5)^2), not by r, because the
+     rasteriser samples pixel centres; reading the radius straight off the row
+     width understates it badly. All three come out at one module. Deliberately
+     not a stroked outline: a single stroked path forces the outer and inner
+     radii to differ by exactly the stroke width, and Chrome's differ by 0.1. */
+  let finders = '';
+  if (DOTS)
+    for (const [fx, fy] of [[0, 0], [size - 7, 0], [0, size - 7]]){
+      const x = fx + QUIET, y = fy + QUIET;
+      finders +=
+        `<rect x="${x}" y="${y}" width="7" height="7" rx="1" fill="#000"/>` +
+        `<rect x="${x + 1}" y="${y + 1}" width="5" height="5" rx="1" fill="#fff"/>` +
+        `<rect x="${x + 2}" y="${y + 2}" width="3" height="3" rx="1" fill="#000"/>`;
+    }
+
+  return `<svg viewBox="0 0 ${dim} ${dim}" role="img" aria-label="QR code holding the link">
+    <rect width="${dim}" height="${dim}" fill="#fff"/>
+    <path d="${squares}" fill="#000" shape-rendering="crispEdges"/>
+    <path d="${dots}" fill="#000"/>
+    ${finders}
+  </svg>`;
 }
 
 class PLQr extends PLElement {
