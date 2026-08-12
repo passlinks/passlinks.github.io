@@ -121,7 +121,18 @@ pl-actions{flex:none;position:sticky;bottom:0;display:flex;gap:10px;
 /* The slot holds the button's place in the footer while the button itself goes
    position:fixed to grow — without it the primary button would stretch into the
    gap the moment the morph starts. */
-.qrslot{flex:none;width:50px;height:50px}
+.qrslot{flex:none;width:50px;height:50px;position:relative}
+
+/* The confirm bar reuses the footer's exact geometry — the input stands where
+   the primary button stood, cancel where the QR button stood — so arming it
+   shifts nothing. */
+.confirm{flex:1;min-width:0;height:50px;border:1px solid var(--accent);border-radius:14px;
+  padding:0 14px;background:var(--card);color:var(--ink);outline:0;
+  font:15px/1 ui-monospace,Menlo,Consolas,monospace}
+.confirm::placeholder{font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:var(--dim)}
+.cancel{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  border:1px solid var(--line);border-radius:14px;background:var(--card);color:var(--dim);cursor:pointer}
+.cancel:active{transform:scale(.985)}
 .secondary{position:relative;overflow:hidden;
   width:50px;height:50px;display:flex;align-items:center;justify-content:center;
   border:1px solid var(--line);border-radius:14px;background:var(--card);color:var(--dim);cursor:pointer}
@@ -848,7 +859,20 @@ class PLGate extends PLElement {
     this.toggle.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
   }
 
-  update(s){ if (this.input.value !== s.master) this.input.value = s.master; }
+  update(s){
+    if (this.input.value !== s.master) this.input.value = s.master;
+
+    /* Drop the keyboard the moment a link actually opens. On a phone it covers
+       the values that were just revealed, and in read mode the master password
+       was the only thing needed — there is nothing left to type.
+
+       Guarded two ways. Only on the false -> true edge, or every later encrypt
+       would steal focus back out of the 2FA field. And only in read mode: while
+       creating, unlocked flips true as soon as the first character lands and the
+       user is still typing. */
+    if (s.mode === 'read' && s.unlocked && !this.wasUnlocked) this.input.blur();
+    this.wasUnlocked = s.unlocked;
+  }
 }
 
 /* ── <pl-password> — never an input: generated, or decrypted ────────────── */
@@ -1078,24 +1102,65 @@ class PLActions extends PLElement {
   render(){ return `
     <div class="scrim"></div>
     <button class="primary" type="button" disabled>${icon('link')}<span>Copy link</span></button>
+    <input class="confirm" type="password" autocomplete="off" autocapitalize="off"
+           spellcheck="false" placeholder="Re-type master password"
+           aria-label="Confirm master password" hidden>
     <span class="qrslot">
       <button class="secondary" type="button" aria-label="Show QR code" aria-expanded="false" disabled>
         <span class="ico">${icon('qr')}</span><span class="fill"></span>
       </button>
+      <button class="cancel" type="button" aria-label="Cancel" hidden>${icon('x')}</button>
     </span>`; }
 
   mount(){
     this.btn = this.$('.secondary');
-    this.$('.primary').addEventListener('click', () => copy(href(store.blob), 'Link copied'));
+    this.confirm = this.$('.confirm');
+    this.$('.primary').addEventListener('click', () => this.copyLink());
+    this.$('.cancel').addEventListener('click', () => this.disarm());
+    /* Matched as it is typed rather than behind a submit button: the moment the
+       two agree there is nothing left to ask. Enter only exists to report a
+       mismatch, since silence while typing must not read as rejection. */
+    this.confirm.addEventListener('input', () => this.check(false));
+    this.confirm.addEventListener('keydown', e => { if (e.key === 'Enter') this.check(true); });
     /* While expanded the button is the QR itself, so a tap on it does nothing;
        the scrim is what dismisses. */
     this.btn.addEventListener('click', () => { if (!store.qr) store.showQr(true); });
     this.$('.scrim').addEventListener('click', () => store.showQr(false));
   }
 
+  /* A typo in a master password cannot be recovered from — nothing in the app
+     can open the link it produces — so the copy is gated on retyping it. Read
+     mode is exempt: a successful decrypt already proved the password is right,
+     and asking again would be theatre. */
+  copyLink(){
+    if (store.mode === 'read') return copy(href(store.blob), 'Link copied');
+    this.arm(true);
+  }
+
+  arm(on){
+    this.armed = on;
+    this.confirm.value = '';
+    this.$('.primary').hidden = this.btn.hidden = on;
+    this.confirm.hidden = this.$('.cancel').hidden = !on;
+    if (on){ this.confirm.focus(); store.say('Re-type the master password to copy'); }
+    else store.say('');
+  }
+
+  disarm(){ this.arm(false); }
+
+  check(submitted){
+    if (this.confirm.value === store.master){
+      this.disarm();
+      copy(href(store.blob), 'Link copied');
+    }
+    else if (submitted) store.say('That does not match', 'err');
+  }
+
   update(s){
     /* Nothing to copy and nothing to encode are the same condition. */
     this.$('.primary').disabled = this.btn.disabled = !s.blob;
+    /* Clear while the bar is armed leaves nothing to confirm. */
+    if (this.armed && !s.blob) this.disarm();
     if (s.qr && s.blob){
       if (this.drawn !== s.blob){          // encoding is not free
         this.$('.fill').innerHTML = qrSvg(href(s.blob));
