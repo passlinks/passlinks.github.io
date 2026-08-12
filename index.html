@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -147,10 +146,14 @@ pl-sheet .top,pl-qr .top{display:flex;align-items:center;justify-content:space-b
 pl-sheet .top strong,pl-qr .top strong{font-size:var(--title);font-weight:650;
   letter-spacing:-.01em;color:var(--ink)}
 
-/* Top-aligned like the other two screens. Centring vertically looked good but
-   left the gap under the bar as a residue of the content height rather than a
-   value anyone chose. Capped at --inner so it lines up with .top. */
-pl-qr .body{display:flex;flex-direction:column;align-items:center;gap:18px;
+/* Centred in the space the bar leaves over — the one screen that does this, and
+   a deliberate exception to the rule that first content sits level across all
+   three. It is safe here only because the bar still owns --bar-gap as a real
+   margin: that is a guaranteed minimum, and centring only ever adds to it, so
+   the gap is a floor plus an even split rather than a residue of content
+   height, which is what made the earlier version unpredictable. */
+pl-qr .body{flex:1;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:18px;
   width:100%;max-width:var(--inner);margin:0 auto}
 /* The symbol stays dark-on-white in both themes: an inverted QR scans on some
    readers and not others, and this one has to work the first time.
@@ -661,6 +664,7 @@ const store = {
   unlocked: false,
   editing:  false,
   qr:       false,
+  sheet:    false,
   message:  '',
   tone:     '',
   receipt:  { text:'', seq:0 },
@@ -668,6 +672,7 @@ const store = {
 
   _subs: new Set(),
   _timer: 0,
+  _pushed: false,
 
   subscribe(fn){ this._subs.add(fn); return () => this._subs.delete(fn); },
   patch(next){ Object.assign(this, next); this._subs.forEach(fn => fn(this)); },
@@ -677,7 +682,25 @@ const store = {
   say(message, tone = ''){ this.patch({ message, tone }); },
   notify(text){ this.patch({ receipt: { text, seq: this.receipt.seq + 1 } }); },
 
-  showQr(on){ this.patch({ qr: on }); },
+  /* Overlays live in a history entry, so the phone's Back button — and the iOS
+     edge-swipe — closes them instead of leaving the page. Two rules keep this
+     from disturbing the hash, which is where the actual data lives:
+
+       · the pushed entry reuses location.href, so the blob stays in the URL;
+       · every close routes through history.back() rather than hiding directly,
+         so the entry is always consumed and the stack never grows.
+
+     Only one entry is ever pushed, whichever overlay opens first. */
+  overlay(name, on){
+    if (on){
+      if (!this._pushed){ history.pushState(null, '', location.href); this._pushed = true; }
+      this.patch({ [name]: true });
+    }
+    else if (this._pushed) history.back();     // popstate below does the hiding
+    else this.closeOverlays();
+  },
+
+  closeOverlays(){ this._pushed = false; this.patch({ qr: false, sheet: false }); },
 
   /* Typing is debounced; every other action lands immediately. */
   nudge(){ clearTimeout(this._timer); this._timer = setTimeout(() => this.sync(), 400); },
@@ -1035,7 +1058,7 @@ class PLQr extends PLElement {
       <p class="url"></p>
     </div>`; }
 
-  mount(){ this.$('.top button').addEventListener('click', () => store.showQr(false)); }
+  mount(){ this.$('.top button').addEventListener('click', () => store.overlay('qr', false)); }
 
   update(s){
     const show = s.qr && !!s.blob;
@@ -1058,7 +1081,7 @@ class PLActions extends PLElement {
 
   mount(){
     this.$('.primary').addEventListener('click', () => copy(href(store.blob), 'Link copied'));
-    this.$('.secondary').addEventListener('click', () => store.showQr(true));
+    this.$('.secondary').addEventListener('click', () => store.overlay('qr', true));
   }
 
   /* Nothing to copy and nothing to encode are the same condition. */
@@ -1091,12 +1114,15 @@ class PLSheet extends PLElement {
 
   mount(){
     this.blob = this.$('.blob');
-    this.$('.top button').addEventListener('click', () => { this.hidden = true; });
-    this.$('.wipe').addEventListener('click', () => { store.clear(); this.hidden = true; });
+    this.$('.top button').addEventListener('click', () => store.overlay('sheet', false));
+    /* clear() first: it rewrites the hash, and the close that follows pops the
+       history entry that rewrite landed on. */
+    this.$('.wipe').addEventListener('click', () => { store.clear(); store.overlay('sheet', false); });
   }
 
   /* Display only — no input event to guard against, so no echo suppression. */
   update(s){
+    this.hidden = !s.sheet;
     this.blob.textContent = s.blob;
     this.blob.className = 'blob' +
       (!s.blob ? '' : s.unlocked ? ' ok' : s.tone === 'err' ? ' err' : '');
@@ -1116,8 +1142,17 @@ customElements.define('pl-sheet', PLSheet);
    5. BOOT
    ═══════════════════════════════════════════════════════════════════════════ */
 
-document.getElementById('info').addEventListener('click', () => {
-  document.querySelector('pl-sheet').hidden = false;
+document.getElementById('info').addEventListener('click', () => store.overlay('sheet', true));
+
+/* popstate only fires for same-document navigation, so reaching here always
+   means one of our own entries was popped — never that the page is unloading.
+   The hash is re-synced only when an overlay was actually open: the entry we
+   land on predates any replaceState done while it was, so it can carry a stale
+   blob, and after Clear that would resurrect data the user just wiped. */
+addEventListener('popstate', () => {
+  const wasOpen = store.qr || store.sheet;
+  store.closeOverlays();
+  if (wasOpen) setHash(store.blob);
 });
 
 if (!crypto.subtle){
