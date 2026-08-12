@@ -3,10 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'; form-action 'none'; base-uri 'none'">
+<!-- The three additions are all 'self': the worker script, the manifest, and the
+     icons the manifest declares. Measured — worker-src is what blocks
+     register() (its fallback chain stops at script-src, which holds no URL
+     source), and icons need img-src even when manifest-src already allows the
+     manifest itself. None of the three opens a path off this origin. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'; form-action 'none'; base-uri 'none'; worker-src 'self'; manifest-src 'self'; img-src 'self'">
 <meta name="robots" content="noindex, nofollow">
 <meta name="referrer" content="no-referrer">
 <meta name="color-scheme" content="light dark">
+<!-- theme-color takes a media query, so the standalone title bar can follow the
+     same two palettes the stylesheet does instead of committing to one. -->
+<meta name="theme-color" content="#f4f5f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0a0c10" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
 <title>Passlink</title>
 <style>
 :root{
@@ -1282,6 +1293,18 @@ if (!crypto.subtle){
     : 'Enter a master password');
   document.querySelector('pl-gate input').focus();
 }
+
+/* Offline. The worker caches this one document and serves it back, which is all
+   that is needed: the URL fragment is never sent in a request, so it never
+   reaches the worker, and one cached copy therefore answers every #blob link
+   with no network at all.
+
+   Guarded on the scheme rather than on https alone, so localhost still
+   registers during development and a page opened over file:// does not throw.
+   The rejection is left unhandled on purpose — the console is where a failed
+   registration should show up, and swallowing it would hide a broken deploy. */
+if ('serviceWorker' in navigator && location.protocol.startsWith('http'))
+  addEventListener('load', () => navigator.serviceWorker.register('sw.js'));
 </script>
 </body>
 </html>
