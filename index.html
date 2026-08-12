@@ -48,8 +48,10 @@ svg.i{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;
 /* ── header ─────────────────────────────────────────────────────────────── */
 header{display:flex;align-items:center;justify-content:space-between;
   height:var(--bar);flex:none;margin-bottom:var(--bar-gap)}
-header h1{font-size:var(--title);font-weight:650;letter-spacing:-.01em;margin:0}
-header h1 b{color:var(--accent)}
+/* The wordmark, declared once and worn by both title bars. .top sets a dim
+   colour for its icons, so --ink has to be stated here rather than inherited. */
+.mark{font-size:var(--title);font-weight:650;letter-spacing:-.01em;margin:0;color:var(--ink)}
+.mark b{color:var(--accent)}
 .iconbtn{background:none;border:0;padding:8px;margin:-8px;color:var(--dim);cursor:pointer;border-radius:8px}
 .iconbtn:active{background:var(--ghost)}
 .iconbtn:disabled{opacity:.3;pointer-events:none}
@@ -116,10 +118,49 @@ pl-actions{flex:none;position:sticky;bottom:0;display:flex;gap:10px;
   font:600 15px/1 inherit;cursor:pointer}
 .primary:disabled{opacity:.35}
 .primary:active:not(:disabled){transform:scale(.985)}
-.secondary{width:50px;height:50px;display:flex;align-items:center;justify-content:center;
+/* The slot holds the button's place in the footer while the button itself goes
+   position:fixed to grow — without it the primary button would stretch into the
+   gap the moment the morph starts. */
+.qrslot{flex:none;width:50px;height:50px}
+.secondary{position:relative;overflow:hidden;
+  width:50px;height:50px;display:flex;align-items:center;justify-content:center;
   border:1px solid var(--line);border-radius:14px;background:var(--card);color:var(--dim);cursor:pointer}
 .secondary:disabled{opacity:.35}
 .secondary:active:not(:disabled){transform:scale(.985)}
+
+/* ── the QR: this button, enlarged ───────────────────────────────────────
+   Not a panel drawn over the button — the same element. Two classes in two
+   steps, because one cannot animate from `position:static`: `.morph` pins the
+   button to its own current rect (visually identical), and only then does
+   `.expanded` give it somewhere to travel to. Border, radius and background
+   are never restated, so they are the button's by definition. */
+pl-actions.expanded{z-index:10}
+pl-actions .scrim{position:fixed;inset:0;background:rgba(0,0,0,.45);
+  opacity:0;pointer-events:none;transition:opacity .28s ease}
+pl-actions.expanded .scrim{opacity:1;pointer-events:auto}
+
+/* Pinned by right/bottom rather than left/top, so the corner it already
+   occupies never moves and only two properties animate: it grows leftward and
+   upward out of the footer instead of flying to the middle of the screen. */
+pl-actions.morph .secondary{position:fixed;z-index:1;
+  right:var(--r);bottom:var(--b);width:var(--w);height:var(--h);
+  transition:width .32s cubic-bezier(.2,.8,.2,1),height .32s cubic-bezier(.2,.8,.2,1)}
+pl-actions.morph .secondary:active{transform:none}
+pl-actions.morph.expanded .secondary{width:var(--ow);height:var(--oh)}
+
+/* Icon out, symbol in. The symbol is drawn once at its final pixel size and
+   clipped by the button's overflow, so its ~1800 path shapes are never relaid
+   out mid-flight — scaling them every frame is what would stutter. */
+.secondary .ico{display:flex;transition:opacity .14s ease}
+.secondary .fill{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  width:var(--qs);height:var(--qs);opacity:0;transition:opacity .18s ease .06s}
+.secondary .fill svg{display:block;width:100%;height:auto}
+pl-actions.expanded .secondary .ico{opacity:0}
+pl-actions.expanded .secondary .fill{opacity:1}
+@media (prefers-reduced-motion:reduce){
+  pl-actions .scrim,pl-actions .secondary,
+  .secondary .ico,.secondary .fill{transition-duration:1ms}
+}
 
 /* ── pl-toast — receipts only, so it may float and vanish; sits above the
       footer and never over it, and never takes a tap ───────────────────── */
@@ -134,41 +175,15 @@ pl-toast{
 pl-toast.show{opacity:1;transform:translate(-50%,0)}
 pl-toast svg.i{width:15px;height:15px;stroke-width:2.5}
 
-/* ── pl-sheet, pl-qr — the two full-screen overlays ─────────────────────── */
-pl-sheet,pl-qr{position:fixed;inset:0;z-index:9;display:flex;flex-direction:column;
+/* ── pl-sheet — full-screen overlay ─────────────────────────────────────── */
+pl-sheet{position:fixed;inset:0;z-index:9;display:flex;flex-direction:column;
   background:var(--bg);
   padding:env(safe-area-inset-top) var(--gutter) calc(16px + env(safe-area-inset-bottom))}
 /* --inner, not --page: the gutter is already spent on the host above, so
    capping at --page here would run 32px wider than <main>'s content box. */
-pl-sheet .top,pl-qr .top{display:flex;align-items:center;justify-content:space-between;
+pl-sheet .top{display:flex;align-items:center;justify-content:space-between;
   height:var(--bar);flex:none;color:var(--dim);
   width:100%;max-width:var(--inner);margin:0 auto var(--bar-gap)}
-pl-sheet .top strong,pl-qr .top strong{font-size:var(--title);font-weight:650;
-  letter-spacing:-.01em;color:var(--ink)}
-
-/* Centred in the space the bar leaves over — the one screen that does this, and
-   a deliberate exception to the rule that first content sits level across all
-   three. It is safe here only because the bar still owns --bar-gap as a real
-   margin: that is a guaranteed minimum, and centring only ever adds to it, so
-   the gap is a floor plus an even split rather than a residue of content
-   height, which is what made the earlier version unpredictable. */
-pl-qr .body{flex:1;display:flex;flex-direction:column;align-items:center;
-  justify-content:center;gap:18px;
-  width:100%;max-width:var(--inner);margin:0 auto}
-/* The symbol stays dark-on-white in both themes: an inverted QR scans on some
-   readers and not others, and this one has to work the first time.
-
-   280px is chosen against a measured floor, not by eye: ZXing — the engine most
-   phone scanners are built on — reads this rendering down to 3 px/module and
-   fails at 2. A 116-character link is version 7, so 280px gives 5.3 px/module,
-   roughly 1.8x the floor. No padding: the SVG carries its own 4-module white
-   quiet zone, so padding here would only shrink the symbol inside the box. */
-pl-qr .plate{width:100%;max-width:280px;
-  background:#fff;border-radius:16px;overflow:hidden;
-  box-shadow:0 4px 24px rgba(0,0,0,.16)}
-pl-qr svg{display:block;width:100%;height:auto}
-pl-qr .url{margin:0;max-width:320px;text-align:center;color:var(--dim);
-  font:11px/1.55 ui-monospace,Menlo,Consolas,monospace;word-break:break-all}
 
 pl-sheet .wipe{width:100%;height:46px;margin-top:4px;border:1px solid var(--line);
   border-radius:12px;background:var(--card);color:var(--err);
@@ -211,7 +226,7 @@ pl-sheet .blob:empty::before{content:"Nothing yet — set a master password.";
 
 <main>
   <header>
-    <h1>Pass<b>link</b></h1>
+    <h1 class="mark">Pass<b>link</b></h1>
     <button class="iconbtn" id="info" type="button" aria-label="About"><svg class="i"><use href="#s-info"/></svg></button>
   </header>
 
@@ -227,7 +242,6 @@ pl-sheet .blob:empty::before{content:"Nothing yet — set a master password.";
 
 <pl-actions></pl-actions>
 <pl-toast></pl-toast>
-<pl-qr hidden></pl-qr>
 <pl-sheet hidden></pl-sheet>
 
 <script>
@@ -690,7 +704,9 @@ const store = {
        · every close routes through history.back() rather than hiding directly,
          so the entry is always consumed and the stack never grows.
 
-     Only one entry is ever pushed, whichever overlay opens first. */
+     The QR is deliberately NOT routed through here: it is a momentary expansion
+     of the footer button, dismissed by tapping the scrim, and Back is not
+     repurposed for it. See showQr. */
   overlay(name, on){
     if (on){
       if (!this._pushed){ history.pushState(null, '', location.href); this._pushed = true; }
@@ -701,6 +717,11 @@ const store = {
   },
 
   closeOverlays(){ this._pushed = false; this.patch({ qr: false, sheet: false }); },
+
+  /* No history entry, by request: the QR is a momentary expansion of the footer
+     button, dismissed by tapping the scrim, and Back is not repurposed for it.
+     The button reads its own rect, so nothing needs to be passed in. */
+  showQr(on){ this.patch({ qr: on }); },
 
   /* Typing is debounced; every other action lands immediately. */
   nudge(){ clearTimeout(this._timer); this._timer = setTimeout(() => this.sync(), 400); },
@@ -976,7 +997,7 @@ class PLToast extends PLElement {
   disconnectedCallback(){ clearTimeout(this.timer); super.disconnectedCallback(); }
 }
 
-/* ── <pl-qr> — the link as a symbol, for handing it to a phone in the room ─
+/* ── the symbol itself ───────────────────────────────────────────────────
    One <path> of unit squares rather than a rect per module: a version 20
    symbol is 6500 modules, and 6500 elements is a different kind of page.
 
@@ -1047,52 +1068,86 @@ function qrSvg(text){
   </svg>`;
 }
 
-class PLQr extends PLElement {
-  render(){ return `
-    <div class="top">
-      <strong>Scan to open</strong>
-      <button class="iconbtn" type="button" aria-label="Close">${icon('x')}</button>
-    </div>
-    <div class="body">
-      <div class="plate"></div>
-      <p class="url"></p>
-    </div>`; }
+/* ── <pl-actions> — pinned in the thumb zone, and the owner of the QR ─────
+   The QR is not a separate surface: this component's own secondary button
+   grows into it. Keeping the behaviour here is what lets the real element
+   animate — a sibling component could only ever draw a copy over the top. */
+const QR_MAX = 312, QR_PAD = 16, QR_MS = 320;
 
-  mount(){ this.$('.top button').addEventListener('click', () => store.overlay('qr', false)); }
-
-  update(s){
-    const show = s.qr && !!s.blob;
-    /* Encoding is not free, so only when the payload actually changed. */
-    if (show && this.drawn !== s.blob){
-      const url = href(s.blob);
-      this.$('.plate').innerHTML = qrSvg(url);
-      this.$('.url').textContent = url;
-      this.drawn = s.blob;
-    }
-    this.hidden = !show;
-  }
-}
-
-/* ── <pl-actions> — pinned in the thumb zone, identical in both modes ───── */
 class PLActions extends PLElement {
   render(){ return `
+    <div class="scrim"></div>
     <button class="primary" type="button" disabled>${icon('link')}<span>Copy link</span></button>
-    <button class="secondary" type="button" aria-label="Show QR code" disabled>${icon('qr')}</button>`; }
+    <span class="qrslot">
+      <button class="secondary" type="button" aria-label="Show QR code" aria-expanded="false" disabled>
+        <span class="ico">${icon('qr')}</span><span class="fill"></span>
+      </button>
+    </span>`; }
 
   mount(){
+    this.btn = this.$('.secondary');
     this.$('.primary').addEventListener('click', () => copy(href(store.blob), 'Link copied'));
-    this.$('.secondary').addEventListener('click', () => store.overlay('qr', true));
+    /* While expanded the button is the QR itself, so a tap on it does nothing;
+       the scrim is what dismisses. */
+    this.btn.addEventListener('click', () => { if (!store.qr) store.showQr(true); });
+    this.$('.scrim').addEventListener('click', () => store.showQr(false));
   }
 
-  /* Nothing to copy and nothing to encode are the same condition. */
-  update(s){ this.$('.primary').disabled = this.$('.secondary').disabled = !s.blob; }
+  update(s){
+    /* Nothing to copy and nothing to encode are the same condition. */
+    this.$('.primary').disabled = this.btn.disabled = !s.blob;
+    if (s.qr && s.blob){
+      if (this.drawn !== s.blob){          // encoding is not free
+        this.$('.fill').innerHTML = qrSvg(href(s.blob));
+        this.drawn = s.blob;
+      }
+      if (!this.shown) this.expand();
+    }
+    else if (this.shown) this.collapse();
+  }
+
+  expand(){
+    this.shown = true;
+    const r = this.btn.getBoundingClientRect();
+    /* Grows up and to the left out of the corner it already sits in, so the cap
+       is the room between the button's own edges and the far side of the screen. */
+    const size = Math.min(QR_MAX, r.right - 16, r.bottom - 16);
+    const px = (k, v) => this.style.setProperty(k, v + 'px');
+    px('--r', innerWidth - r.right);  px('--b', innerHeight - r.bottom);
+    px('--w', r.width);  px('--h', r.height);
+    px('--ow', size);    px('--oh', size);  px('--qs', size - QR_PAD * 2);
+
+    this.classList.add('morph');
+    /* Reading a layout property commits the pinned-but-unchanged geometry before
+       the second class lands. Without it both states collapse into one style
+       recalculation and there is nothing to interpolate. The usual double
+       requestAnimationFrame does the same job but only where frames are
+       actually being produced. */
+    void this.btn.offsetWidth;
+    this.classList.add('expanded');
+    this.btn.setAttribute('aria-expanded', 'true');
+    this.btn.setAttribute('aria-label', 'QR code — tap outside to close');
+  }
+
+  collapse(){
+    this.shown = false;
+    this.classList.remove('expanded');
+    this.btn.setAttribute('aria-expanded', 'false');
+    this.btn.setAttribute('aria-label', 'Show QR code');
+    clearTimeout(this.timer);
+    /* .morph is what pins the button out of the footer's flow, so it may only be
+       dropped once the shrink has finished travelling back. */
+    this.timer = setTimeout(() => { if (!store.qr) this.classList.remove('morph'); }, QR_MS);
+  }
+
+  disconnectedCallback(){ clearTimeout(this.timer); super.disconnectedCallback(); }
 }
 
 /* ── <pl-sheet> — the notes, plus the raw string for anyone who wants it ── */
 class PLSheet extends PLElement {
   render(){ return `
     <div class="top">
-      <strong>About</strong>
+      <strong class="mark">Pass<b>link</b></strong>
       <button class="iconbtn" type="button" aria-label="Close">${icon('x')}</button>
     </div>
     <div class="body">
@@ -1134,7 +1189,6 @@ customElements.define('pl-password', PLPassword);
 customElements.define('pl-totp', PLTotp);
 customElements.define('pl-status', PLStatus);
 customElements.define('pl-toast', PLToast);
-customElements.define('pl-qr', PLQr);
 customElements.define('pl-actions', PLActions);
 customElements.define('pl-sheet', PLSheet);
 
