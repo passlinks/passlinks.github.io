@@ -3,86 +3,232 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'; form-action 'none'; base-uri 'none'">
 <meta name="robots" content="noindex, nofollow">
 <meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
 <title>Passlink</title>
 <style>
-*{box-sizing:border-box}
-body{max-width:560px;margin:0 auto;padding:32px 16px 64px;background:#fff;color:#111;
-     font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
-h1{font-size:18px;margin:0 0 20px}
-label{display:block;font-size:12px;font-weight:600;color:#666;margin:16px 0 5px}
-input,textarea{width:100%;padding:9px 11px;border:1px solid #ccc;border-radius:6px;
-               font-size:14px;font-family:ui-monospace,Menlo,Consolas,monospace;background:#fff;color:#111}
-input:focus,textarea:focus{outline:2px solid #2a5bd7;outline-offset:-1px;border-color:#2a5bd7}
-textarea{resize:vertical;min-height:60px;word-break:break-all}
-textarea.ok{border-color:#0f7b4f}
-textarea.err{border-color:#b32020}
-button{margin-top:12px;margin-right:6px;padding:9px 14px;border:1px solid #ccc;border-radius:6px;
-       background:#fff;color:#111;font-size:13px;font-family:inherit;cursor:pointer}
-button:hover{border-color:#2a5bd7}
-.row{display:flex;align-items:flex-end;justify-content:space-between;gap:12px}
-.row label{margin-bottom:5px}
-button.mini{margin:0 0 5px;padding:3px 9px;font-size:11px}
-#code{font:600 26px/1 ui-monospace,Menlo,Consolas,monospace;letter-spacing:.1em;color:#0f7b4f;margin-top:8px}
-#code.bad{font-size:13px;font-weight:400;letter-spacing:0;color:#b32020}
-#secs{font-size:12px;color:#666;margin-top:4px}
-#status{font-size:12px;color:#666;margin-top:8px;min-height:18px}
-#status.ok{color:#0f7b4f}
-#status.err{color:#b32020}
-p.note{font-size:12px;color:#666;line-height:1.55;margin-top:28px}
+:root{
+  --bg:#f4f5f7; --card:#ffffff; --ink:#0f1115; --dim:#6b7280; --line:#e4e7ec;
+  --accent:#2a5bd7; --accent-ink:#ffffff; --ok:#0f7b4f; --err:#b32020;
+  --ghost:#f0f2f5;
+  /* One page width, one gutter. --inner is what a box already inside the
+     gutter must cap at to line up with <main>'s content box. */
+  --page:480px; --gutter:16px;
+  --inner:calc(var(--page) - var(--gutter) * 2);
+  /* Two type roles that recur across screens: the screen title, and the
+     small-caps section label. One value each, or they drift apart. */
+  --title:16px; --label:11px;
+  /* The title bar has one height on every screen, and it owns the gap below
+     itself — left to the first child's margin, that gap drifts per screen. */
+  --bar:36px; --bar-gap:16px;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#0a0c10; --card:#15181f; --ink:#e9ebef; --dim:#8b93a1; --line:#242932;
+    --accent:#7aa2ff; --accent-ink:#0a0c10; --ok:#4ade80; --err:#f87171;
+    --ghost:#1b1f27;
+  }
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{
+  margin:0;display:flex;flex-direction:column;min-height:100dvh;
+  background:var(--bg);color:var(--ink);
+  font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  padding:env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+}
+/* No padding-top: the bar starts flush against the safe area, exactly as it
+   does inside the overlays, which is what keeps the three screens level. */
+main{flex:1;padding:0 var(--gutter) 8px;max-width:var(--page);width:100%;margin:0 auto}
+svg.i{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;
+      stroke-linecap:round;stroke-linejoin:round;display:block}
+
+/* ── header ─────────────────────────────────────────────────────────────── */
+header{display:flex;align-items:center;justify-content:space-between;
+  height:var(--bar);flex:none;margin-bottom:var(--bar-gap)}
+header h1{font-size:var(--title);font-weight:650;letter-spacing:-.01em;margin:0}
+header h1 b{color:var(--accent)}
+.iconbtn{background:none;border:0;padding:8px;margin:-8px;color:var(--dim);cursor:pointer;border-radius:8px}
+.iconbtn:active{background:var(--ghost)}
+.iconbtn:disabled{opacity:.3;pointer-events:none}
+
+/* ── pl-gate ────────────────────────────────────────────────────────────── */
+pl-gate{display:flex;align-items:center;gap:10px;background:var(--card);
+  border:1px solid var(--line);border-radius:14px;padding:0 12px;height:52px;
+  transition:border-color .15s,box-shadow .15s}
+pl-gate:focus-within{border-color:var(--accent);
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 18%,transparent)}
+pl-gate>svg.i{color:var(--dim);flex:none}
+pl-gate input{flex:1;min-width:0;border:0;outline:0;background:none;color:var(--ink);
+  font:15px/1 ui-monospace,Menlo,Consolas,monospace;padding:0}
+pl-gate input::placeholder{font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:var(--dim)}
+
+/* ── rows (pl-password, pl-totp) ────────────────────────────────────────── */
+.rows{margin-top:14px;background:var(--card);border:1px solid var(--line);border-radius:14px}
+.rows>*{display:block;padding:12px 14px}
+.rows>*+*{border-top:1px solid var(--line)}
+.rowhead{display:flex;align-items:center;justify-content:space-between;height:20px}
+.lab{font-size:var(--label);font-weight:700;letter-spacing:.09em;color:var(--dim)}
+.acts{display:flex;gap:2px;margin-right:-6px}
+.acts .iconbtn{padding:6px;margin:0}
+.acts svg.i{width:16px;height:16px}
+.val{font:15px/1.35 ui-monospace,Menlo,Consolas,monospace;word-break:break-all;
+  margin-top:6px;min-height:21px}
+
+/* Locked is a per-row class, not a global body flag: each row masks its own
+   value, so nothing reaches across components. Dots, not a loading skeleton —
+   nothing here is loading, it is a secret being withheld. */
+.locked .acts{opacity:0;pointer-events:none}
+.locked .val,.locked .code{color:var(--dim);opacity:.5;user-select:none}
+.locked .track,.locked .secs{display:none}
+
+/* ── pl-totp internals ──────────────────────────────────────────────────── */
+.code{font:650 30px/1 ui-monospace,Menlo,Consolas,monospace;letter-spacing:.06em;
+  color:var(--ok);margin-top:8px}
+.code.bad{font-size:13px;font-weight:400;letter-spacing:0;color:var(--err)}
+.track{height:3px;border-radius:2px;background:var(--line);margin-top:9px;overflow:hidden}
+.track>div{height:100%;background:var(--ok);border-radius:2px;transition:width .95s linear}
+.secs{font-size:11px;color:var(--dim);margin-top:5px;font-variant-numeric:tabular-nums}
+.ghost{display:flex;align-items:center;gap:6px;margin-top:6px;padding:6px 10px;
+  background:var(--ghost);border:0;border-radius:9px;color:var(--dim);
+  font:13px/1 inherit;cursor:pointer}
+.ghost svg.i{width:14px;height:14px}
+.secinput{width:100%;margin-top:6px;border:1px solid var(--accent);border-radius:9px;
+  padding:9px 11px;background:var(--bg);color:var(--ink);outline:0;
+  font:14px/1.3 ui-monospace,Menlo,Consolas,monospace}
+[hidden]{display:none!important}
+
+/* ── pl-status ──────────────────────────────────────────────────────────── */
+pl-status{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--dim);
+  margin:12px 2px 0;min-height:17px}
+pl-status.ok{color:var(--ok)} pl-status.err{color:var(--err)}
+pl-status i{width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
+
+/* ── pl-actions ─────────────────────────────────────────────────────────── */
+pl-actions{flex:none;position:sticky;bottom:0;display:flex;gap:10px;
+  background:linear-gradient(transparent,var(--bg) 22%);
+  padding:14px var(--gutter) calc(14px + env(safe-area-inset-bottom));
+  max-width:var(--page);width:100%;margin:0 auto}
+.primary{flex:1;display:flex;align-items:center;justify-content:center;gap:8px;height:50px;
+  border:0;border-radius:14px;background:var(--accent);color:var(--accent-ink);
+  font:600 15px/1 inherit;cursor:pointer}
+.primary:disabled{opacity:.35}
+.primary:active:not(:disabled){transform:scale(.985)}
+.secondary{width:50px;height:50px;display:flex;align-items:center;justify-content:center;
+  border:1px solid var(--line);border-radius:14px;background:var(--card);color:var(--dim);cursor:pointer}
+.secondary:disabled{opacity:.35}
+.secondary:active:not(:disabled){transform:scale(.985)}
+
+/* ── pl-toast — receipts only, so it may float and vanish; sits above the
+      footer and never over it, and never takes a tap ───────────────────── */
+pl-toast{
+  position:fixed;left:50%;bottom:calc(86px + env(safe-area-inset-bottom));z-index:8;
+  display:flex;align-items:center;gap:8px;padding:10px 16px;border-radius:999px;
+  background:var(--ink);color:var(--bg);
+  font:550 13px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  white-space:nowrap;box-shadow:0 6px 24px rgba(0,0,0,.22);
+  opacity:0;transform:translate(-50%,8px);pointer-events:none;
+  transition:opacity .18s ease,transform .18s ease}
+pl-toast.show{opacity:1;transform:translate(-50%,0)}
+pl-toast svg.i{width:15px;height:15px;stroke-width:2.5}
+
+/* ── pl-sheet, pl-qr — the two full-screen overlays ─────────────────────── */
+pl-sheet,pl-qr{position:fixed;inset:0;z-index:9;display:flex;flex-direction:column;
+  background:var(--bg);
+  padding:env(safe-area-inset-top) var(--gutter) calc(16px + env(safe-area-inset-bottom))}
+/* --inner, not --page: the gutter is already spent on the host above, so
+   capping at --page here would run 32px wider than <main>'s content box. */
+pl-sheet .top,pl-qr .top{display:flex;align-items:center;justify-content:space-between;
+  height:var(--bar);flex:none;color:var(--dim);
+  width:100%;max-width:var(--inner);margin:0 auto var(--bar-gap)}
+pl-sheet .top strong,pl-qr .top strong{font-size:var(--title);font-weight:650;
+  letter-spacing:-.01em;color:var(--ink)}
+
+/* Top-aligned like the other two screens. Centring vertically looked good but
+   left the gap under the bar as a residue of the content height rather than a
+   value anyone chose. Capped at --inner so it lines up with .top. */
+pl-qr .body{display:flex;flex-direction:column;align-items:center;gap:18px;
+  width:100%;max-width:var(--inner);margin:0 auto}
+/* The symbol stays dark-on-white in both themes: an inverted QR scans on some
+   readers and not others, and this one has to work the first time. */
+pl-qr .plate{background:#fff;padding:14px;border-radius:16px;width:100%;max-width:300px;
+  box-shadow:0 4px 24px rgba(0,0,0,.16)}
+pl-qr svg{display:block;width:100%;height:auto}
+pl-qr .url{margin:0;max-width:320px;text-align:center;color:var(--dim);
+  font:11px/1.55 ui-monospace,Menlo,Consolas,monospace;word-break:break-all}
+
+pl-sheet .wipe{width:100%;height:46px;margin-top:4px;border:1px solid var(--line);
+  border-radius:12px;background:var(--card);color:var(--err);
+  font:600 14px/1 inherit;cursor:pointer}
+pl-sheet .wipe:active{background:var(--ghost)}
+pl-sheet .body{overflow-y:auto;padding-bottom:24px;max-width:var(--inner);width:100%;margin:0 auto}
+/* The bar already supplied --bar-gap; the first heading must not add to it. */
+pl-sheet .body>:first-child{margin-top:0}
+pl-sheet h2{font-size:var(--label);font-weight:700;letter-spacing:.09em;color:var(--dim);margin:18px 0 8px}
+pl-sheet p{font-size:13px;line-height:1.6;color:var(--dim);margin:0 0 12px}
+/* Read-only output, not a field: a div is already content-height, so there is
+   no min-height, no resize handle and no scrollHeight measuring to do.
+   user-select:all makes one long-press take the whole string, which is the
+   only way anyone ever wants it. */
+pl-sheet .blob{border:1px solid var(--line);border-radius:12px;padding:10px 12px;
+  background:var(--card);color:var(--ink);word-break:break-all;
+  font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;
+  -webkit-user-select:all;user-select:all}
+pl-sheet .blob.ok{border-color:var(--ok)}
+pl-sheet .blob.err{border-color:var(--err)}
+pl-sheet .blob:empty::before{content:"Nothing yet — set a master password.";
+  color:var(--dim);font-family:inherit;-webkit-user-select:none;user-select:none}
 </style>
 </head>
 <body>
 
-<h1>Passlink</h1>
+<svg style="display:none" aria-hidden="true">
+<symbol id="s-key" viewBox="0 0 24 24"><path d="M21 2l-2 2m-7.6 7.6a5 5 0 1 1-7.1 7.1 5 5 0 0 1 7.1-7.1zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3"/></symbol>
+<symbol id="s-eye" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></symbol>
+<symbol id="s-eyeoff" viewBox="0 0 24 24"><path d="M17.9 17.9A10 10 0 0 1 12 20C5 20 1 12 1 12a18.5 18.5 0 0 1 5.1-5.9m3.8-1.9A9 9 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.2 3.2m-6.7-1.1a3 3 0 1 1-4.2-4.2"/><line x1="1" y1="1" x2="23" y2="23"/></symbol>
+<symbol id="s-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+<symbol id="s-check" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></symbol>
+<symbol id="s-qr" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM18 18h3v3h-3z"/></symbol>
+<symbol id="s-chev" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></symbol>
+<symbol id="s-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></symbol>
+<symbol id="s-x" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></symbol>
+<symbol id="s-plus" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></symbol>
+<symbol id="s-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7L11.8 5.2"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></symbol>
+</svg>
 
-<label for="master">Master password</label>
-<input id="master" type="password" autocomplete="off" spellcheck="false">
+<main>
+  <header>
+    <h1>Pass<b>link</b></h1>
+    <button class="iconbtn" id="info" type="button" aria-label="About"><svg class="i"><use href="#s-info"/></svg></button>
+  </header>
 
-<div class="row">
-  <label for="pw">Password</label>
-  <button id="genpw" class="mini" type="button">Generate 20 chars</button>
-</div>
-<input id="pw" type="text" autocomplete="off" spellcheck="false">
+  <pl-gate></pl-gate>
 
-<label for="secret">2FA secret</label>
-<input id="secret" type="text" autocomplete="off" spellcheck="false" placeholder="NEUT QBLB 4LXU …">
+  <div class="rows">
+    <pl-password></pl-password>
+    <pl-totp></pl-totp>
+  </div>
 
-<div id="code" hidden>— — —</div>
-<div id="secs" hidden></div>
+  <pl-status></pl-status>
+</main>
 
-<label for="cipher">Encrypted string</label>
-<textarea id="cipher" autocomplete="off" spellcheck="false" placeholder="Generated as you type above, or paste one here to unlock."></textarea>
-<div id="status"></div>
-<button id="copyLink" type="button">Copy link</button>
-<button id="clear" type="button">Clear</button>
-
-<p class="note">
-Type a password and a 2FA secret; both are encrypted into the string below and parked
-after the <code>#</code> in the URL, where browsers never send it to a server.
-Nothing is kept here — you keep the string.
-</p>
-
-<p class="note">
-The master password is all that protects it. Anyone holding the string can guess at it
-offline, forever, with no rate limit and no way to revoke: if it leaks, change the
-password at the site itself. Make it long.
-</p>
-
-<p class="note">
-AES-256-GCM keyed by PBKDF2-SHA256 at 3M iterations, over a random salt carried in the
-string, all in your browser. When sharing a link, send the master password through a
-different channel.
-</p>
+<pl-actions></pl-actions>
+<pl-toast></pl-toast>
+<pl-qr hidden></pl-qr>
+<pl-sheet hidden></pl-sheet>
 
 <script>
 'use strict';
-const $ = id => document.getElementById(id);
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   1. CRYPTO — pure functions, no DOM, no shared state. Everything they need
+      arrives as an argument, so this layer can be lifted out or tested alone.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
 const enc = new TextEncoder(), dec = new TextDecoder();
-const master = $('master'), pw = $('pw'), secret = $('secret'), cipher = $('cipher');
 
 const SALT = 12, IV = 12;   // salt and IV are separate so the derived key can be cached:
 const TAG  = 128;           // the salt holds still while a fresh IV goes into every string
@@ -104,16 +250,16 @@ const cat = (...parts) => {
    long as the master password and the salt both hold still, so typing stays instant. */
 const same = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
 let cache = null;
+const dropCache = () => { cache = null; };
 
-async function key(salt){
-  const pwd = master.value;
+async function deriveKey(pwd, salt){
   if (cache && cache.pwd === pwd && same(cache.salt, salt)) return cache.key;
   const raw = await crypto.subtle.importKey('raw', enc.encode(pwd), 'PBKDF2', false, ['deriveKey']);
-  const derived = await crypto.subtle.deriveKey(
+  const key = await crypto.subtle.deriveKey(
     { name:'PBKDF2', salt, iterations:ITERATIONS, hash:'SHA-256' }, raw,
     { name:'AES-GCM', length:256 }, false, ['encrypt','decrypt']);
-  cache = { pwd, salt: salt.slice(), key: derived };
-  return derived;
+  cache = { pwd, salt: salt.slice(), key };
+  return key;
 }
 
 /* Base32 (RFC 4648, no padding) — every 8 chars of a 2FA secret pack into 5 bytes. */
@@ -162,11 +308,11 @@ async function totp(raw){
      [.. end]  secret */
 const PACKED = 0x80, PWMAX = 0x7f;
 
-function pack(){
-  const pwBytes = enc.encode(pw.value);
+function pack(pw, secret){
+  const pwBytes = enc.encode(pw);
   if (pwBytes.length > PWMAX) throw 'PWLEN';
-  let head = pwBytes.length, sec = enc.encode(secret.value);
-  const norm = b32.norm(secret.value);
+  let head = pwBytes.length, sec = enc.encode(secret);
+  const norm = b32.norm(secret);
   if (norm){
     try {
       const bytes = b32.d(norm);
@@ -181,9 +327,27 @@ function unpack(body){
   if (!body.length || 1 + pwLen > body.length) throw 'FORMAT';
   const sec = body.subarray(1 + pwLen);
   return {
-    p: dec.decode(body.subarray(1, 1 + pwLen)),
-    s: body[0] & PACKED ? b32.e(sec) : dec.decode(sec)
+    pw: dec.decode(body.subarray(1, 1 + pwLen)),
+    secret: body[0] & PACKED ? b32.e(sec) : dec.decode(sec)
   };
+}
+
+async function seal(master, salt, pw, secret){
+  const iv = crypto.getRandomValues(new Uint8Array(IV));   // fresh every time — never reuse a GCM IV
+  const ct = await crypto.subtle.encrypt(
+    { name:'AES-GCM', iv, tagLength:TAG }, await deriveKey(master, salt), pack(pw, secret));
+  return b64.e(cat(salt, iv, new Uint8Array(ct)));
+}
+
+async function unseal(master, blob){
+  if (!/^[A-Za-z0-9_-]+$/.test(blob)) throw 'FORMAT';
+  const raw = b64.d(blob);
+  if (raw.length < SALT + IV + TAG / 8 + 1) throw 'FORMAT';
+  const salt = raw.subarray(0, SALT);
+  const pt = await crypto.subtle.decrypt(
+    { name:'AES-GCM', iv: raw.subarray(SALT, SALT + IV), tagLength:TAG },
+    await deriveKey(master, salt), raw.subarray(SALT + IV));
+  return { ...unpack(new Uint8Array(pt)), salt: salt.slice() };
 }
 
 /* 75 symbols over 20 characters — a shade under 125 bits. */
@@ -191,7 +355,7 @@ const PW_LEN = 20;
 const PW_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*-_=+?';
 const PW_CLASSES = [/[a-z]/, /[A-Z]/, /[0-9]/, /[^A-Za-z0-9]/];
 
-function generate(n){
+function generate(n = PW_LEN){
   const limit = 256 - 256 % PW_ALPHABET.length;   // drop the short tail, else the first
   const buf = new Uint8Array(n * 2);              // few symbols would come up more often
   for (;;){
@@ -207,107 +371,695 @@ function generate(n){
   }
 }
 
-let salt = crypto.getRandomValues(new Uint8Array(SALT));
-let quiet = false, timer;
+/* ═══════════════════════════════════════════════════════════════════════════
+   2. QR encoder — byte mode, error correction level M, versions 1..20.
+   Enough for any Passlink URL; no external code, which the page's CSP forbids.
 
-const status = (msg, cls) => { $('status').textContent = msg; $('status').className = cls || ''; };
-const mark = cls => { cipher.className = cls || ''; };
-const setHash = v => history.replaceState(null, '', location.pathname + (v ? '#' + v : ''));
-/* Served from the root of a domain the path is just "/", and dropping it saves a character. */
-const link = blob => location.origin + (location.pathname === '/' ? '' : location.pathname) + '#' + blob;
+   Verified against the `qrcode` package (bit-exact for all 8 masks, versions
+   1-20) and round-tripped through the jsQR decoder.
+   ═══════════════════════════════════════════════════════════════════════════ */
 
-async function encrypt(){
-  if (!pw.value && !secret.value){
-    quiet = true; cipher.value = ''; quiet = false;
-    mark(); setHash(''); status(''); return;
+const QR = (() => {
+  /* Codewords per version, and how level M splits them. Derived values only:
+     block lengths and ECC-per-block fall out of these three rows. */
+  const TOTAL  = [26,44,70,100,134,172,196,242,292,346,404,466,532,581,655,733,815,901,991,1085];
+  const ECCTOT = [10,16,26,36,48,64,72,88,110,130,150,176,198,216,240,280,308,338,364,416];
+  const BLOCKS = [1,1,1,2,2,4,4,4,5,5,5,8,9,9,10,10,11,13,14,16];
+
+  /* GF(256), primitive polynomial x^8+x^4+x^3+x^2+1 */
+  const EXP = new Uint8Array(512), LOG = new Uint8Array(256);
+  for (let i = 0, x = 1; i < 255; i++){
+    EXP[i] = x; LOG[x] = i;
+    x <<= 1; if (x & 0x100) x ^= 0x11d;
   }
-  if (!master.value) return status('Enter a master password to encrypt');
-  status('Encrypting…');
-  let body;
-  try { body = pack(); }
-  catch { return status(`Password is too long (max ${PWMAX} bytes)`, 'err'); }
-  const iv = crypto.getRandomValues(new Uint8Array(IV));   // fresh every time — never reuse a GCM IV
-  const ct = await crypto.subtle.encrypt({ name:'AES-GCM', iv, tagLength:TAG }, await key(salt), body);
-  const blob = b64.e(cat(salt, iv, new Uint8Array(ct)));
-  quiet = true; cipher.value = blob; quiet = false;
-  mark('ok'); setHash(blob); status('Encrypted', 'ok');
+  for (let i = 255; i < 512; i++) EXP[i] = EXP[i - 255];
+  const mul = (a, b) => (a && b) ? EXP[LOG[a] + LOG[b]] : 0;
+
+  /* Generator polynomial for n check symbols, monic term dropped. */
+  function divisor(n){
+    let g = [1];
+    for (let i = 0; i < n; i++){
+      const next = new Array(g.length + 1).fill(0);
+      for (let j = 0; j < g.length; j++){
+        next[j]     ^= g[j];
+        next[j + 1] ^= mul(g[j], EXP[i]);
+      }
+      g = next;
+    }
+    return g.slice(1);
+  }
+
+  function remainder(data, div){
+    const out = new Uint8Array(div.length);
+    for (const b of data){
+      const f = b ^ out[0];
+      out.copyWithin(0, 1); out[out.length - 1] = 0;
+      if (f) for (let i = 0; i < out.length; i++) out[i] ^= mul(div[i], f);
+    }
+    return out;
+  }
+
+  const dataCap = v => TOTAL[v - 1] - ECCTOT[v - 1];
+
+  function pickVersion(len){
+    for (let v = 1; v <= 20; v++)
+      if (4 + (v < 10 ? 8 : 16) + len * 8 <= dataCap(v) * 8) return v;
+    throw new Error('too long for a version 20 symbol');
+  }
+
+  /* Mode indicator, character count, payload, terminator, then the 0xEC/0x11
+     pad alternation up to the version's data capacity. */
+  function bitstream(bytes, v){
+    const bits = [];
+    const push = (val, len) => { for (let i = len - 1; i >= 0; i--) bits.push((val >>> i) & 1); };
+    push(0b0100, 4);
+    push(bytes.length, v < 10 ? 8 : 16);
+    for (const b of bytes) push(b, 8);
+    const cap = dataCap(v) * 8;
+    push(0, Math.min(4, cap - bits.length));
+    while (bits.length % 8) bits.push(0);
+    for (let i = 0; bits.length < cap; i++) push(i % 2 ? 0x11 : 0xEC, 8);
+    const cw = new Uint8Array(cap / 8);
+    bits.forEach((b, i) => { if (b) cw[i >> 3] |= 0x80 >> (i & 7); });
+    return cw;
+  }
+
+  /* Split into RS blocks — the longer blocks come last — then interleave. */
+  function codewords(bytes, v){
+    const nb = BLOCKS[v - 1], eccLen = ECCTOT[v - 1] / nb;
+    const total = TOTAL[v - 1], dataLen = dataCap(v);
+    const short = Math.floor(dataLen / nb), extra = dataLen % nb;
+    const div = divisor(eccLen);
+    const blocks = [], eccs = [];
+    for (let i = 0, p = 0; i < nb; i++){
+      const len = short + (i >= nb - extra ? 1 : 0);
+      const blk = bytes.subarray(p, p + len); p += len;
+      blocks.push(blk); eccs.push(remainder(blk, div));
+    }
+    const out = new Uint8Array(total); let k = 0;
+    for (let i = 0; i <= short; i++) for (const b of blocks) if (i < b.length) out[k++] = b[i];
+    for (let i = 0; i < eccLen; i++) for (const e of eccs) out[k++] = e[i];
+    return out;
+  }
+
+  const MASKS = [
+    (x, y) => (x + y) % 2,
+    (x, y) => y % 2,
+    (x, y) => x % 3,
+    (x, y) => (x + y) % 3,
+    (x, y) => (((x / 3) | 0) + ((y / 2) | 0)) % 2,
+    (x, y) => (x * y) % 2 + (x * y) % 3,
+    (x, y) => ((x * y) % 2 + (x * y) % 3) % 2,
+    (x, y) => ((x + y) % 2 + (x * y) % 3) % 2
+  ];
+
+  function build(text, opt = {}){
+    const bytes = new TextEncoder().encode(text);
+    const v = opt.version || pickVersion(bytes.length);
+    const n = 17 + 4 * v;
+    const mods = Array.from({ length:n }, () => new Uint8Array(n));
+    const fn   = Array.from({ length:n }, () => new Uint8Array(n));
+    const set = (x, y, dark) => { mods[y][x] = dark ? 1 : 0; fn[y][x] = 1; };
+
+    /* Finder patterns, drawn with their separators: Chebyshev distance 2 and 4
+       are the light rings, so one loop covers both. */
+    for (const [cx, cy] of [[3,3],[n-4,3],[3,n-4]])
+      for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++){
+        const x = cx + dx, y = cy + dy;
+        if (x < 0 || x >= n || y < 0 || y >= n) continue;
+        const d = Math.max(Math.abs(dx), Math.abs(dy));
+        set(x, y, d !== 2 && d !== 4);
+      }
+
+    for (let i = 8; i < n - 8; i++){ set(6, i, i % 2 === 0); set(i, 6, i % 2 === 0); }
+
+    /* Alignment pattern coordinates: evenly spaced, always including 6 and n-7. */
+    const ap = [];
+    if (v > 1){
+      const num = Math.floor(v / 7) + 2;
+      const step = Math.ceil((v * 4 + 4) / (num * 2 - 2)) * 2;
+      ap.push(6);
+      for (let pos = n - 7; ap.length < num; pos -= step) ap.splice(1, 0, pos);
+    }
+    const first = ap[0], last = ap[ap.length - 1];
+    for (const y of ap) for (const x of ap){
+      if ((x === first && y === first) || (x === first && y === last) || (x === last && y === first)) continue;
+      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++)
+        set(x + dx, y + dy, Math.max(Math.abs(dx), Math.abs(dy)) !== 1);
+    }
+
+    /* Version information — 18 BCH bits, only from version 7 up. */
+    if (v >= 7){
+      let rem = v;
+      for (let i = 0; i < 12; i++) rem = (rem << 1) ^ ((rem >>> 11) * 0x1F25);
+      const bits = (v << 12) | rem;
+      for (let i = 0; i < 18; i++){
+        const bit = (bits >>> i) & 1, a = n - 11 + i % 3, b = (i / 3) | 0;
+        set(a, b, bit); set(b, a, bit);
+      }
+    }
+
+    /* Format information, level M = 0b00. Written once per mask candidate. */
+    const drawFormat = mask => {
+      const data = (0b00 << 3) | mask;
+      let rem = data;
+      for (let i = 0; i < 10; i++) rem = (rem << 1) ^ ((rem >>> 9) * 0x537);
+      const bits = ((data << 10) | rem) ^ 0x5412;
+      const bit = i => (bits >>> i) & 1;
+      for (let i = 0; i <= 5; i++) set(8, i, bit(i));
+      set(8, 7, bit(6)); set(8, 8, bit(7)); set(7, 8, bit(8));
+      for (let i = 9; i <= 14; i++) set(14 - i, 8, bit(i));
+      for (let i = 0; i <= 7; i++) set(n - 1 - i, 8, bit(i));
+      for (let i = 8; i <= 14; i++) set(8, n - 15 + i, bit(i));
+      set(8, n - 8, 1);
+    };
+
+    /* Reserve the format area before laying data down — drawFormat is what
+       marks those 31 modules as function modules, and data placement reads
+       that map. Written again below with the mask actually chosen. */
+    drawFormat(0);
+
+    /* Two-column boustrophedon from the bottom right, column 6 skipped. */
+    const cw = codewords(bitstream(bytes, v), v);
+    let i = 0;
+    for (let right = n - 1; right >= 1; right -= 2){
+      if (right === 6) right = 5;
+      for (let vert = 0; vert < n; vert++) for (let j = 0; j < 2; j++){
+        const x = right - j;
+        const upward = ((right + 1) & 2) === 0;
+        const y = upward ? n - 1 - vert : vert;
+        if (!fn[y][x] && i < cw.length * 8){
+          mods[y][x] = (cw[i >> 3] >>> (7 - (i & 7))) & 1;
+          i++;
+        }
+      }
+    }
+
+    const apply = m => {
+      for (let y = 0; y < n; y++) for (let x = 0; x < n; x++)
+        if (!fn[y][x] && MASKS[m](x, y) === 0) mods[y][x] ^= 1;
+    };
+
+    let mask = opt.mask;
+    if (mask == null){
+      let best = Infinity;
+      for (let m = 0; m < 8; m++){
+        apply(m); drawFormat(m);
+        const p = penalty(mods, n);
+        apply(m);
+        if (p < best){ best = p; mask = m; }
+      }
+    }
+    apply(mask); drawFormat(mask);
+    return { size:n, version:v, mask, modules:mods };
+  }
+
+  /* ISO/IEC 18004 penalty rules 1-4. */
+  function penalty(mods, n){
+    const N1 = 3, N2 = 3, N3 = 40, N4 = 10;
+    let score = 0;
+
+    const addHistory = (run, hist) => {
+      if (hist[0] === 0) run += n;      // the quiet zone counts as light run
+      hist.pop(); hist.unshift(run);
+    };
+    const countPatterns = h => {
+      const k = h[1];
+      const core = k > 0 && h[2] === k && h[3] === k * 3 && h[4] === k && h[5] === k;
+      return (core && h[0] >= k * 4 && h[6] >= k ? 1 : 0)
+           + (core && h[6] >= k * 4 && h[0] >= k ? 1 : 0);
+    };
+    const terminate = (color, run, hist) => {
+      if (color){ addHistory(run, hist); run = 0; }
+      addHistory(run + n, hist);
+      return countPatterns(hist);
+    };
+
+    for (const transposed of [false, true]){
+      const at = (a, b) => transposed ? mods[b][a] : mods[a][b];
+      for (let a = 0; a < n; a++){
+        let color = 0, run = 0; const hist = [0,0,0,0,0,0,0];
+        for (let b = 0; b < n; b++){
+          if (at(a, b) === color){
+            run++;
+            if (run === 5) score += N1; else if (run > 5) score += 1;
+          } else {
+            addHistory(run, hist);
+            if (!color) score += countPatterns(hist) * N3;
+            color = at(a, b); run = 1;
+          }
+        }
+        score += terminate(color, run, hist) * N3;
+      }
+    }
+
+    for (let y = 0; y < n - 1; y++) for (let x = 0; x < n - 1; x++){
+      const c = mods[y][x];
+      if (c === mods[y][x+1] && c === mods[y+1][x] && c === mods[y+1][x+1]) score += N2;
+    }
+
+    let dark = 0;
+    for (const row of mods) for (const m of row) dark += m;
+    const total = n * n;
+    score += (Math.ceil(Math.abs(dark * 20 - total * 10) / total) - 1) * N4;
+    return score;
+  }
+
+  return { build };
+})();
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   3. STORE — the only mutable state in the app. Components never write to
+      each other; they call an action and re-render from what comes back.
+
+      The hash decides the mode at load; `unlocked` is the single switch every
+      row reads, which is what makes the two directions render identically.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+const href = blob =>
+  location.origin + (location.pathname === '/' ? '' : location.pathname) + '#' + blob;
+const setHash = v =>
+  history.replaceState(null, '', location.pathname + (v ? '#' + v : ''));
+
+const store = {
+  mode:     location.hash.length > 1 ? 'read' : 'create',
+  blob:     location.hash.length > 1 ? location.hash.slice(1).trim() : '',
+  master:   '',
+  pw:       '',
+  secret:   '',
+  unlocked: false,
+  editing:  false,
+  qr:       false,
+  message:  '',
+  tone:     '',
+  receipt:  { text:'', seq:0 },
+  salt:     crypto.getRandomValues(new Uint8Array(SALT)),
+
+  _subs: new Set(),
+  _timer: 0,
+
+  subscribe(fn){ this._subs.add(fn); return () => this._subs.delete(fn); },
+  patch(next){ Object.assign(this, next); this._subs.forEach(fn => fn(this)); },
+  /* Two channels, on purpose. `say` is the lock state and stays on screen;
+     `notify` is a receipt for a tap just made and leaves on its own. The seq
+     counter is what lets the same text fire twice in a row. */
+  say(message, tone = ''){ this.patch({ message, tone }); },
+  notify(text){ this.patch({ receipt: { text, seq: this.receipt.seq + 1 } }); },
+
+  showQr(on){ this.patch({ qr: on }); },
+
+  /* Typing is debounced; every other action lands immediately. */
+  nudge(){ clearTimeout(this._timer); this._timer = setTimeout(() => this.sync(), 400); },
+  now(){ clearTimeout(this._timer); return this.sync(); },
+
+  setMaster(v){ this.patch({ master: v }); this.nudge(); },
+
+  setSecret(v){
+    if (v === this.secret) return;
+    this.patch({ secret: v });
+    if (this.unlocked) this.now();
+  },
+
+  clear(){
+    clearTimeout(this._timer);
+    dropCache();
+    setHash('');
+    this.patch({
+      mode: 'create', blob: '', master: '', pw: '', secret: '',
+      unlocked: false, editing: false, message: 'Cleared', tone: 'ok',
+      salt: crypto.getRandomValues(new Uint8Array(SALT))
+    });
+  },
+
+  /* The one entry point. An empty master locks the rows but leaves the hash
+     alone, so backspacing over the master password never costs you the link. */
+  async sync(){
+    if (!this.master){
+      return this.patch({
+        unlocked: false,
+        message: this.mode === 'read' && this.blob
+          ? 'Enter the master password to unlock' : 'Enter a master password',
+        tone: ''
+      });
+    }
+    if (this.mode === 'read' && !this.unlocked) return this.unlock();
+    /* Drawn exactly once, here, and nowhere else. There is no rotate button:
+       a second draw would silently replace a password that may already have
+       been saved at the site. Starting over means clear(), on purpose. */
+    if (!this.pw) this.pw = generate();
+    this.unlocked = true;
+    return this.encrypt();
+  },
+
+  async encrypt(){
+    this.say('Encrypting…');
+    let blob;
+    try { blob = await seal(this.master, this.salt, this.pw, this.secret); }
+    catch (e){ return this.say(e === 'PWLEN' ? `Password is too long (max ${PWMAX} bytes)` : 'Could not encrypt', 'err'); }
+    setHash(blob);
+    this.patch({ blob, unlocked: true, message: 'Encrypted — the link is ready', tone: 'ok' });
+  },
+
+  async unlock(){
+    if (!this.blob) return this.say('');
+    this.say('Decrypting…');
+    try {
+      const { pw, secret, salt } = await unseal(this.master, this.blob);
+      setHash(this.blob);   // adopt the salt too, so editing what we just opened reuses the cached key
+      this.patch({ pw, secret, salt, unlocked: true, message: 'Unlocked', tone: 'ok' });
+    } catch (e){
+      this.patch({
+        unlocked: false,
+        message: e === 'FORMAT' ? 'Malformed string' : 'Wrong master password, or the string is corrupt',
+        tone: 'err'
+      });
+    }
+  }
+};
+
+/* Clipboard writes reject on an insecure origin or a denied permission — worth
+   a real message, since silently copying nothing is the worst outcome here. */
+const copy = (text, msg) => navigator.clipboard.writeText(text)
+  .then(() => store.notify(msg))
+  .catch(() => store.say('Could not reach the clipboard', 'err'));
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   4. COMPONENTS — light DOM on purpose. A shadow root would isolate these
+      inputs from iOS password autofill and force the palette to be duplicated
+      per component; the class and its lifecycle are what we actually wanted.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+class PLElement extends HTMLElement {
+  connectedCallback(){
+    if (!this._built){ this.innerHTML = this.render(); this.mount?.(); this._built = true; }
+    this._off = store.subscribe(s => this.update(s));
+    this.update(store);
+  }
+  disconnectedCallback(){ this._off?.(); this._off = null; }
+  $(sel){ return this.querySelector(sel); }
+  render(){ return ''; }
+  update(){}
 }
 
-async function decrypt(){
-  const blob = cipher.value.trim();
-  if (!blob){ mark(); setHash(''); status(''); return; }
-  if (!master.value) return status('Enter a master password to decrypt');
-  status('Decrypting…');
-  try {
-    if (!/^[A-Za-z0-9_-]+$/.test(blob)) throw 'FORMAT';
-    const raw = b64.d(blob);
-    if (raw.length < SALT + IV + TAG / 8 + 1) throw 'FORMAT';
-    const s = raw.subarray(0, SALT);
-    const pt = await crypto.subtle.decrypt(
-      { name:'AES-GCM', iv: raw.subarray(SALT, SALT + IV), tagLength:TAG },
-      await key(s), raw.subarray(SALT + IV));
-    const data = unpack(new Uint8Array(pt));
-    salt = s.slice();   // adopt it, so editing what we just opened reuses the cached key
-    quiet = true; pw.value = data.p; secret.value = data.s; quiet = false;
-    mark('ok'); setHash(blob); status('Decrypted', 'ok'); tick();
-  } catch (e){
-    mark('err');
-    status(e === 'FORMAT' ? 'Malformed string' : 'Wrong master password, or the string is corrupt', 'err');
+const icon = (name, cls = 'i') => `<svg class="${cls}"><use href="#s-${name}"/></svg>`;
+
+/* Locked rows show dots at the true shape of what they are hiding — a full
+   20-character password, a six-digit code — so unlocking shifts nothing. */
+const MASK_PW   = '•'.repeat(PW_LEN);
+const MASK_CODE = '••• •••';
+
+/* ── <pl-gate> — the master password, the only input on the screen ──────── */
+class PLGate extends PLElement {
+  render(){ return `
+    ${icon('key')}
+    <input type="password" autocomplete="off" autocapitalize="off" spellcheck="false"
+           placeholder="Master password" aria-label="Master password">
+    <button class="iconbtn" type="button" aria-label="Show password">${icon('eye')}</button>`; }
+
+  mount(){
+    this.input = this.$('input');
+    this.input.addEventListener('input', () => store.setMaster(this.input.value));
+    this.toggle = this.$('button');
+    /* Scoped to the button: the key icon renders first, so a bare 'use' here
+       would swap that one instead. */
+    this.eye = this.$('button use');
+    this.toggle.addEventListener('click', () => this.peek());
+  }
+
+  peek(){
+    const show = this.input.type === 'password';
+    this.input.type = show ? 'text' : 'password';
+    this.eye.setAttribute('href', show ? '#s-eyeoff' : '#s-eye');
+    this.toggle.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+  }
+
+  update(s){ if (this.input.value !== s.master) this.input.value = s.master; }
+}
+
+/* ── <pl-password> — never an input: generated, or decrypted ────────────── */
+class PLPassword extends PLElement {
+  render(){ return `
+    <div class="rowhead">
+      <span class="lab">PASSWORD</span>
+      <span class="acts">
+        <button class="iconbtn" data-act="copy" type="button" aria-label="Copy password">${icon('copy')}</button>
+      </span>
+    </div>
+    <div class="val"></div>`; }
+
+  mount(){
+    this.$('[data-act=copy]').addEventListener('click', () => copy(store.pw, 'Password copied'));
+  }
+
+  update(s){
+    this.classList.toggle('locked', !s.unlocked);
+    this.$('.val').textContent = s.unlocked ? s.pw : MASK_PW;
   }
 }
 
-const run = fn => { if (!quiet){ clearTimeout(timer); timer = setTimeout(fn, 400); } };
-[pw, secret].forEach(el => el.addEventListener('input', () => { run(encrypt); tick(); }));
-cipher.addEventListener('input', () => run(decrypt));
-master.addEventListener('input', () =>
-  run(cipher.value.trim() && !pw.value && !secret.value ? decrypt : encrypt));
+/* ── <pl-totp> — owns its ticker, its editing state, and its own cleanup ── */
+class PLTotp extends PLElement {
+  render(){ return `
+    <div class="rowhead">
+      <span class="lab">2FA</span>
+      <span class="acts">
+        <button class="iconbtn" data-act="edit" type="button" aria-label="Edit 2FA secret">${icon('chev')}</button>
+        <button class="iconbtn" data-act="copy" type="button" aria-label="Copy code">${icon('copy')}</button>
+      </span>
+    </div>
+    <div class="body">
+      <button class="ghost" data-act="add" type="button">${icon('plus')}Add a 2FA secret</button>
+      <input class="secinput" type="text" autocomplete="off" autocapitalize="characters"
+             spellcheck="false" placeholder="NEUT QBLB 4LXU …" aria-label="2FA secret" hidden>
+      <div data-part="code" hidden>
+        <div class="code">— — —</div>
+        <div class="track"><div></div></div>
+        <div class="secs"></div>
+      </div>
+    </div>`; }
 
-async function tick(){
-  const raw = secret.value.trim();
-  $('code').hidden = $('secs').hidden = !raw;
-  if (!raw) return;
-  $('secs').textContent = (30 - Math.floor(Date.now() / 1000 % 30)) + 's left';
-  try {
-    const c = await totp(raw);
-    $('code').className = '';
-    $('code').textContent = c.slice(0,3) + ' ' + c.slice(3);
-  } catch {
-    $('code').className = 'bad';
-    $('code').textContent = 'Not a valid Base32 secret';
+  mount(){
+    this.input = this.$('.secinput');
+    this.$('[data-act=add]').addEventListener('click', () => this.open());
+    this.$('[data-act=edit]').addEventListener('click', () =>
+      store.editing ? this.input.blur() : this.open());
+    this.$('[data-act=copy]').addEventListener('click', () => this.copyCode());
+
+    /* A valid Base32 prefix is still valid Base32 — "NEUT" parses fine — so no
+       amount of watching the keystrokes can tell us the secret is complete.
+       Leaving the field is the only unambiguous signal. */
+    this.input.addEventListener('blur', () => this.close());
+    this.input.addEventListener('keydown', e => { if (e.key === 'Enter') this.input.blur(); });
+
+    this.ticker = setInterval(() => this.tick(), 1000);
+  }
+
+  disconnectedCallback(){ clearInterval(this.ticker); super.disconnectedCallback(); }
+
+  open(){
+    store.patch({ editing: true });
+    this.input.value = store.secret;
+    this.input.focus();
+  }
+
+  close(){
+    if (!store.editing) return;
+    store.patch({ editing: false });
+    store.setSecret(this.input.value.trim());
+  }
+
+  async copyCode(){
+    try { await copy(await totp(store.secret), 'Code copied'); }
+    catch { store.say('Not a valid Base32 secret', 'err'); }
+  }
+
+  update(s){
+    const locked = !s.unlocked;
+    this.classList.toggle('locked', locked);
+
+    /* Locked, the row is only ever the masked code — never the ghost button or
+       the input, so the shape on screen is the same in both directions. */
+    this.$('[data-act=add]').hidden   = locked || s.editing || !!s.secret;
+    this.$('[data-act=copy]').hidden  = locked || !s.secret;
+    this.input.hidden                 = locked || !s.editing;
+    this.$('[data-part=code]').hidden = locked ? false : (s.editing || !s.secret);
+    this.$('[data-act=edit] svg').style.transform = s.editing ? 'rotate(180deg)' : '';
+
+    if (locked){
+      this.$('.code').className = 'code';   // tick() bails while locked, so set the mask here
+      this.$('.code').textContent = MASK_CODE;
+    }
+    this.tick();
+  }
+
+  async tick(){
+    if (!store.unlocked || !store.secret || store.editing) return;
+    const rem = 30 - Math.floor(Date.now() / 1000 % 30);
+    const code = this.$('.code');
+    try {
+      const c = await totp(store.secret);
+      code.className = 'code';
+      code.textContent = c.slice(0, 3) + ' ' + c.slice(3);
+      this.$('.track>div').style.width = (rem / 30 * 100) + '%';
+      this.$('.secs').textContent = rem + 's';
+    } catch {
+      code.className = 'code bad';
+      code.textContent = 'Not a valid Base32 secret';
+      this.$('.track>div').style.width = '0%';
+      this.$('.secs').textContent = '';
+    }
   }
 }
-setInterval(tick, 1000);
 
-$('genpw').addEventListener('click', () => {
-  pw.value = generate(PW_LEN);
-  clearTimeout(timer);
-  encrypt();
-});
+/* ── <pl-status> ────────────────────────────────────────────────────────── */
+class PLStatus extends PLElement {
+  render(){ return `<i></i><span></span>`; }
+  update(s){
+    this.className = s.tone;
+    this.$('i').hidden = !s.message;
+    this.$('span').textContent = s.message;
+  }
+}
 
-$('copyLink').addEventListener('click', e => {
-  const blob = cipher.value.trim();
-  if (!blob) return status('Nothing to share yet', 'err');
-  navigator.clipboard.writeText(link(blob));
-  e.target.textContent = 'Copied';
-  setTimeout(() => { e.target.textContent = 'Copy link'; }, 1000);
-});
+/* ── <pl-toast> — the transient half of what <pl-status> used to carry ────
+   State is a value the component reads; a receipt is an event, and the store
+   has no event bus. The seq counter bridges the two: same text, new number,
+   so tapping copy twice fires twice. */
+class PLToast extends PLElement {
+  render(){ return `${icon('check')}<span></span>`; }
 
-$('clear').addEventListener('click', () => {
-  clearTimeout(timer);
-  quiet = true;
-  master.value = pw.value = secret.value = cipher.value = '';
-  quiet = false;
-  cache = null;
-  salt = crypto.getRandomValues(new Uint8Array(SALT));
-  mark(); setHash(''); status('Cleared', 'ok'); tick(); master.focus();
+  mount(){ this.seen = store.receipt.seq; }
+
+  update(s){
+    if (s.receipt.seq === this.seen) return;
+    this.seen = s.receipt.seq;
+    this.$('span').textContent = s.receipt.text;
+    this.classList.add('show');
+    clearTimeout(this.timer);
+    this.timer = setTimeout(() => this.classList.remove('show'), 1600);
+  }
+
+  disconnectedCallback(){ clearTimeout(this.timer); super.disconnectedCallback(); }
+}
+
+/* ── <pl-qr> — the link as a symbol, for handing it to a phone in the room ─
+   One <path> of unit squares rather than a rect per module: a version 20
+   symbol is 6500 modules, and 6500 elements is a different kind of page. */
+function qrSvg(text){
+  const { size, modules } = QR.build(text);
+  const quiet = 4, dim = size + quiet * 2;
+  let d = '';
+  for (let y = 0; y < size; y++)
+    for (let x = 0; x < size; x++)
+      if (modules[y][x]) d += `M${x + quiet} ${y + quiet}h1v1h-1z`;
+  return `<svg viewBox="0 0 ${dim} ${dim}" shape-rendering="crispEdges" role="img"
+    aria-label="QR code holding the link"><rect width="${dim}" height="${dim}"
+    fill="#fff"/><path d="${d}" fill="#000"/></svg>`;
+}
+
+class PLQr extends PLElement {
+  render(){ return `
+    <div class="top">
+      <strong>Scan to open</strong>
+      <button class="iconbtn" type="button" aria-label="Close">${icon('x')}</button>
+    </div>
+    <div class="body">
+      <div class="plate"></div>
+      <p class="url"></p>
+    </div>`; }
+
+  mount(){ this.$('.top button').addEventListener('click', () => store.showQr(false)); }
+
+  update(s){
+    const show = s.qr && !!s.blob;
+    /* Encoding is not free, so only when the payload actually changed. */
+    if (show && this.drawn !== s.blob){
+      const url = href(s.blob);
+      this.$('.plate').innerHTML = qrSvg(url);
+      this.$('.url').textContent = url;
+      this.drawn = s.blob;
+    }
+    this.hidden = !show;
+  }
+}
+
+/* ── <pl-actions> — pinned in the thumb zone, identical in both modes ───── */
+class PLActions extends PLElement {
+  render(){ return `
+    <button class="primary" type="button" disabled>${icon('link')}<span>Copy link</span></button>
+    <button class="secondary" type="button" aria-label="Show QR code" disabled>${icon('qr')}</button>`; }
+
+  mount(){
+    this.$('.primary').addEventListener('click', () => copy(href(store.blob), 'Link copied'));
+    this.$('.secondary').addEventListener('click', () => store.showQr(true));
+  }
+
+  /* Nothing to copy and nothing to encode are the same condition. */
+  update(s){ this.$('.primary').disabled = this.$('.secondary').disabled = !s.blob; }
+}
+
+/* ── <pl-sheet> — the notes, plus the raw string for anyone who wants it ── */
+class PLSheet extends PLElement {
+  render(){ return `
+    <div class="top">
+      <strong>About</strong>
+      <button class="iconbtn" type="button" aria-label="Close">${icon('x')}</button>
+    </div>
+    <div class="body">
+      <h2>ENCRYPTED STRING</h2>
+      <div class="blob"></div>
+      <h2>HOW IT WORKS</h2>
+      <p>A generated password and a 2FA secret are encrypted into the string above and parked
+      after the <code>#</code> in the URL, where browsers never send it to a server.
+      Nothing is kept here — you keep the link.</p>
+      <p>The master password is all that protects it. Anyone holding the string can guess at it
+      offline, forever, with no rate limit and no way to revoke: if it leaks, change the
+      password at the site itself. Make it long.</p>
+      <p>AES-256-GCM keyed by PBKDF2-SHA256 at 3M iterations, over a random salt carried in the
+      string, all in your browser. When sharing a link, send the master password through a
+      different channel.</p>
+      <h2>SESSION</h2>
+      <button class="wipe" type="button">Clear everything</button>
+    </div>`; }
+
+  mount(){
+    this.blob = this.$('.blob');
+    this.$('.top button').addEventListener('click', () => { this.hidden = true; });
+    this.$('.wipe').addEventListener('click', () => { store.clear(); this.hidden = true; });
+  }
+
+  /* Display only — no input event to guard against, so no echo suppression. */
+  update(s){
+    this.blob.textContent = s.blob;
+    this.blob.className = 'blob' +
+      (!s.blob ? '' : s.unlocked ? ' ok' : s.tone === 'err' ? ' err' : '');
+  }
+}
+
+customElements.define('pl-gate', PLGate);
+customElements.define('pl-password', PLPassword);
+customElements.define('pl-totp', PLTotp);
+customElements.define('pl-status', PLStatus);
+customElements.define('pl-toast', PLToast);
+customElements.define('pl-qr', PLQr);
+customElements.define('pl-actions', PLActions);
+customElements.define('pl-sheet', PLSheet);
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   5. BOOT
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+document.getElementById('info').addEventListener('click', () => {
+  document.querySelector('pl-sheet').hidden = false;
 });
 
 if (!crypto.subtle){
-  status('This browser has no Web Crypto — open the page over HTTPS', 'err');
-} else if (location.hash.length > 1){
-  cipher.value = location.hash.slice(1).trim();
-  status('This link holds data — enter the master password to unlock');
-  master.focus();
+  store.say('This browser has no Web Crypto — open the page over HTTPS', 'err');
+} else {
+  store.say(store.mode === 'read'
+    ? 'This link holds data — enter the master password'
+    : 'Enter a master password');
+  document.querySelector('pl-gate input').focus();
 }
 </script>
 </body>
