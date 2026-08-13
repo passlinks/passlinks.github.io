@@ -34,6 +34,13 @@
   /* The title bar has one height on every screen, and it owns the gap below
      itself — left to the first child's margin, that gap drifts per screen. */
   --bar:36px; --bar-gap:16px;
+  /* A row shows one of three faces below its heading — the value, the ghost
+     button offering to create it, or the editor replacing both — and they are
+     one slot at one height. Measured at 27/33/44.2px apart: opening the editor
+     pushed everything below down 11.2px and closing pulled it up 17.2px, on
+     every single edit. A row changing mode is not content changing; nothing
+     below it may move. */
+  --slot:21px; --slot-gap:6px;
 }
 @media (prefers-color-scheme:dark){
   :root{
@@ -87,8 +94,11 @@ pl-gate input::placeholder{font-family:-apple-system,BlinkMacSystemFont,sans-ser
 .acts{display:flex;gap:2px;margin-right:-6px}
 .acts .iconbtn{padding:6px;margin:0}
 .acts svg.i{width:16px;height:16px}
-.val{font:15px/1.35 ui-monospace,Menlo,Consolas,monospace;word-break:break-all;
-  margin-top:6px;min-height:21px}
+/* The slot, worn by all three. min-height rather than height: a long account
+   or a wrapped password may grow the row — that is content, and content is
+   allowed to move things. */
+.val,.ghost,.secinput{margin-top:var(--slot-gap);min-height:var(--slot)}
+.val{font:15px/1.35 ui-monospace,Menlo,Consolas,monospace;word-break:break-all}
 
 /* Locked is a per-row class, not a global body flag: each row masks its own
    value, so nothing reaches across components. Dots, not a loading skeleton —
@@ -104,13 +114,21 @@ pl-gate input::placeholder{font-family:-apple-system,BlinkMacSystemFont,sans-ser
 .track{height:3px;border-radius:2px;background:var(--line);margin-top:9px;overflow:hidden}
 .track>div{height:100%;background:var(--ok);border-radius:2px;transition:width .95s linear}
 .secs{font-size:11px;color:var(--dim);margin-top:5px;font-variant-numeric:tabular-nums}
-.ghost{display:flex;align-items:center;gap:6px;margin-top:6px;padding:6px 10px;
-  background:var(--ghost);border:0;border-radius:9px;color:var(--dim);
+.ghost{display:flex;align-items:center;gap:6px;padding:0 10px;margin-left:-10px;
+  background:none;border:0;color:var(--dim);
   font:13px/1 inherit;cursor:pointer}
 .ghost svg.i{width:14px;height:14px}
-.secinput{width:100%;margin-top:6px;border:1px solid var(--accent);border-radius:9px;
-  padding:9px 11px;background:var(--bg);color:var(--ink);outline:0;
-  font:14px/1.3 ui-monospace,Menlo,Consolas,monospace}
+/* The editor is the value, made typable — same font, same box, no border and
+   no padding of its own. A bordered field was what made the row taller while
+   open; it also said "a form appeared" when what happened is that one line
+   became editable. The label turning accent-coloured says that instead, and
+   costs no height. */
+/* display:block, or the inline box keeps a descender's worth of leading under
+   it and the row lands 0.1px off the value it replaces. */
+.secinput{display:block;width:100%;padding:0;border:0;background:none;color:var(--ink);outline:0;
+  font:15px/1.35 ui-monospace,Menlo,Consolas,monospace}
+.secinput::placeholder{font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:var(--dim)}
+.rows>*:focus-within .lab{color:var(--accent)}
 [hidden]{display:none!important}
 
 /* ── pl-status ──────────────────────────────────────────────────────────── */
@@ -254,7 +272,11 @@ pl-sheet .blob:empty::before{content:"Nothing yet — set a master password.";
 
   <pl-gate></pl-gate>
 
+  <!-- The order a login is actually performed in: where, who, then the two
+       secrets. -->
   <div class="rows">
+    <pl-field key="service"></pl-field>
+    <pl-field key="account"></pl-field>
     <pl-password></pl-password>
     <pl-totp></pl-totp>
   </div>
@@ -347,41 +369,91 @@ async function totp(raw){
   return String(n % 1000000).padStart(6, '0');
 }
 
-/* Plaintext body — one header byte, then the two fields back to back:
-     [0]       bit 7    the secret is stored as packed Base32 bytes, not as text
-               bits 0-6 length of the password in bytes
-     [1 ..]    password, UTF-8
-     [.. end]  secret */
+/* Plaintext body, version 2 — a marker, a flags byte, then every field as one
+   length byte followed by its bytes:
+
+     [0]       0x7f, the marker
+     [1]       bit 0  the secret is stored as packed Base32 bytes, not as text
+     [2 ..]    password, secret, service, account — each [len][bytes]
+
+   The marker is 0x7f and not 0x00 for a reason. Version 1 spent that same byte
+   on `pwLen | PACKED`, so any value is a legal v1 header and there is no free
+   bit to claim; what there is instead is a length that cannot occur, since the
+   password is always the 20 bytes generate() drew. 0x7f reads to a v1 parser as
+   a 127-byte password, which fails its own bounds check on every body shorter
+   than 128 — so the page as it shipped before these two fields existed reports
+   "Malformed string" rather than opening a link and showing an empty password.
+   0x00 would have passed that check and failed silently.
+
+   Length-prefixed rather than delimited because a packed secret is binary and
+   may contain any byte, 0x00 among them — there is no character to delimit on.
+
+   Fields are positional, and running out of body simply yields empty strings
+   from that point on. A later version can therefore append a fifth field and
+   this reader still opens the link, which is the whole reason not to spend two
+   bytes per field on tags. */
+const V2 = 0x7f, PACKED2 = 0x01;
+const FIELDLIMIT = 255;               // one length byte per field
+
+/* Version 1: one header byte carrying the password length and the packed bit,
+   then the password and the secret back to back. Read-only — links made by it
+   are re-sealed as v2. */
 const PACKED = 0x80, PWMAX = 0x7f;
 
-function pack(pw, secret){
-  const pwBytes = enc.encode(pw);
-  if (pwBytes.length > PWMAX) throw 'PWLEN';
-  let head = pwBytes.length, sec = enc.encode(secret);
-  const norm = b32.norm(secret);
+function pack(rec){
+  let sec = enc.encode(rec.secret), flags = 0;
+  const norm = b32.norm(rec.secret);
   if (norm){
     try {
       const bytes = b32.d(norm);
-      if (b32.e(bytes) === norm){ head |= PACKED; sec = bytes; }   // only pack when it round-trips exactly
+      if (b32.e(bytes) === norm){ flags |= PACKED2; sec = bytes; }   // only pack when it round-trips exactly
     } catch { /* not Base32 — keep the text as typed */ }
   }
-  return cat(new Uint8Array([head]), pwBytes, sec);
+  const fields = [enc.encode(rec.pw), sec, enc.encode(rec.service), enc.encode(rec.account)];
+  if (fields.some(f => f.length > FIELDLIMIT)) throw 'FIELDLEN';
+  return cat(new Uint8Array([V2, flags]),
+             ...fields.flatMap(f => [new Uint8Array([f.length]), f]));
 }
 
 function unpack(body){
+  if (!body.length) throw 'FORMAT';
+  return body[0] === V2 ? unpack2(body) : unpack1(body);
+}
+
+function unpack1(body){
   const pwLen = body[0] & PWMAX;
-  if (!body.length || 1 + pwLen > body.length) throw 'FORMAT';
+  if (1 + pwLen > body.length) throw 'FORMAT';
   const sec = body.subarray(1 + pwLen);
   return {
     pw: dec.decode(body.subarray(1, 1 + pwLen)),
-    secret: body[0] & PACKED ? b32.e(sec) : dec.decode(sec)
+    secret: body[0] & PACKED ? b32.e(sec) : dec.decode(sec),
+    service: '', account: ''
   };
 }
 
-async function seal(master, salt, pw, secret){
+function unpack2(body){
+  let p = 2;
+  const next = () => {
+    if (p >= body.length) return new Uint8Array(0);   // ran out: this field, and every
+    const len = body[p];                              // field after it, is empty
+    if (p + 1 + len > body.length) throw 'FORMAT';
+    const out = body.subarray(p + 1, p + 1 + len);
+    p += 1 + len;
+    return out;
+  };
+  const pw = next(), sec = next(), service = next(), account = next();
+  return {
+    pw:      dec.decode(pw),
+    secret:  body[1] & PACKED2 ? b32.e(sec) : dec.decode(sec),
+    service: dec.decode(service),
+    account: dec.decode(account)
+  };
+}
+
+async function seal(master, salt, rec){
   const iv = crypto.getRandomValues(new Uint8Array(IV));   // fresh every time — never reuse a GCM IV
   const ct = await crypto.subtle.encrypt(
-    { name:'AES-GCM', iv, tagLength:TAG }, await deriveKey(master, salt), pack(pw, secret));
+    { name:'AES-GCM', iv, tagLength:TAG }, await deriveKey(master, salt), pack(rec));
   return b64.e(cat(salt, iv, new Uint8Array(ct)));
 }
 
@@ -671,7 +743,13 @@ const QR = (() => {
     return score;
   }
 
-  return { build };
+  /* The longest byte-mode payload a version 20 symbol holds: the whole data
+     capacity less the 4-bit mode indicator and the 16-bit character count.
+     Published so a caller can ask before encoding — build() can only throw,
+     and the answer is needed while deciding whether to offer the QR at all. */
+  const LIMIT = dataCap(20) - 3;
+
+  return { build, LIMIT };
 })();
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -697,8 +775,13 @@ const store = {
   master:   '',
   pw:       '',
   secret:   '',
+  service:  '',
+  account:  '',
   unlocked: false,
-  editing:  false,
+  /* Which row owns the open editor, by name, rather than a flag — there are
+     three editable rows now and only one keyboard, so two of them open at once
+     is a state that should not be representable. */
+  editing:  '',
   qr:       false,
   sheet:    false,
   message:  '',
@@ -751,9 +834,11 @@ const store = {
 
   setMaster(v){ this.patch({ master: v }); this.nudge(); },
 
-  setSecret(v){
-    if (v === this.secret) return;
-    this.patch({ secret: v });
+  /* One setter for all three typed rows: they differ only in which key they
+     write, and re-sealing on every commit is the same job in each case. */
+  setField(key, v){
+    if (v === this[key]) return;
+    this.patch({ [key]: v });
     if (this.unlocked) this.now();
   },
 
@@ -762,8 +847,8 @@ const store = {
     dropCache();
     setHash('');
     this.patch({
-      mode: 'create', blob: '', master: '', pw: '', secret: '',
-      unlocked: false, editing: false, message: 'Cleared', tone: 'ok',
+      mode: 'create', blob: '', master: '', pw: '', secret: '', service: '', account: '',
+      unlocked: false, editing: '', message: 'Cleared', tone: 'ok',
       salt: crypto.getRandomValues(new Uint8Array(SALT))
     });
   },
@@ -791,8 +876,10 @@ const store = {
   async encrypt(){
     this.say('Encrypting…');
     let blob;
-    try { blob = await seal(this.master, this.salt, this.pw, this.secret); }
-    catch (e){ return this.say(e === 'PWLEN' ? `Password is too long (max ${PWMAX} bytes)` : 'Could not encrypt', 'err'); }
+    /* The store is the record: pack reads pw, secret, service and account off
+       whatever it is handed, and those are already this object's own keys. */
+    try { blob = await seal(this.master, this.salt, this); }
+    catch (e){ return this.say(e === 'FIELDLEN' ? `That is too long (max ${FIELDLIMIT} bytes)` : 'Could not encrypt', 'err'); }
     setHash(blob);
     this.patch({ blob, unlocked: true, message: 'Encrypted — the link is ready', tone: 'ok' });
   },
@@ -801,9 +888,9 @@ const store = {
     if (!this.blob) return this.say('');
     this.say('Decrypting…');
     try {
-      const { pw, secret, salt } = await unseal(this.master, this.blob);
+      const { pw, secret, service, account, salt } = await unseal(this.master, this.blob);
       setHash(this.blob);   // adopt the salt too, so editing what we just opened reuses the cached key
-      this.patch({ pw, secret, salt, unlocked: true, message: 'Unlocked', tone: 'ok' });
+      this.patch({ pw, secret, service, account, salt, unlocked: true, message: 'Unlocked', tone: 'ok' });
     } catch (e){
       this.patch({
         unlocked: false,
@@ -844,6 +931,12 @@ const icon = (name, cls = 'i') => `<svg class="${cls}"><use href="#s-${name}"/><
    20-character password, a six-digit code — so unlocking shifts nothing. */
 const MASK_PW   = '•'.repeat(PW_LEN);
 const MASK_CODE = '••• •••';
+/* A typed field has no fixed length to match, so this one is a flat 12 — long
+   enough to read as withheld text, short enough never to wrap to a second line
+   on a 320px screen, which is the only way the row could change height. It also
+   keeps every locked link looking alike: nothing here says whether this one
+   carries a service name, an account, or neither. */
+const MASK_FIELD = '•'.repeat(12);
 
 /* ── <pl-gate> — the master password, the only input on the screen ──────── */
 class PLGate extends PLElement {
@@ -883,6 +976,89 @@ class PLGate extends PLElement {
        user is still typing. */
     if (s.mode === 'read' && s.unlocked && !this.wasUnlocked) this.input.blur();
     this.wasUnlocked = s.unlocked;
+  }
+}
+
+/* ── <pl-field> — the two typed rows, one class ──────────────────────────
+   SERVICE and ACCOUNT differ only in their wording and in whether a copy
+   button earns its place, so they are one component read twice rather than
+   two near-identical ones.
+
+   ACCOUNT is not USERNAME: what goes there is an email at one site, a phone
+   number at a bank, a citizen ID at a government app. The label has to hold
+   all three, and the placeholder is what does the explaining.
+
+   Editing follows <pl-totp> exactly — a ghost button opens an input, and blur
+   commits. Not because the same ambiguity applies (a half-typed email is
+   visibly half-typed, unlike a half-typed Base32 secret) but because the row
+   next to it already behaves this way, and two idioms in one card is one too
+   many. */
+const FIELDS = {
+  service: { label:'SERVICE', add:'Add a service', place:'Binance, Vietcombank, VneID…' },
+  account: { label:'ACCOUNT', add:'Add an account', place:'Email, phone, or ID number',
+             copied:'Account copied' }
+};
+
+/* Characters, not bytes — the byte ceiling is FIELDLIMIT and sits far above
+   this. 64 is here to keep the QR small, and a name that needs more than 64
+   characters is not a name. */
+const FIELD_MAX = 64;
+
+class PLField extends PLElement {
+  render(){
+    const f = FIELDS[this.getAttribute('key')], name = f.label.toLowerCase();
+    return `
+    <div class="rowhead">
+      <span class="lab">${f.label}</span>
+      <span class="acts">
+        <button class="iconbtn" data-act="edit" type="button" aria-label="Edit ${name}">${icon('chev')}</button>
+        ${f.copied ? `<button class="iconbtn" data-act="copy" type="button" aria-label="Copy ${name}">${icon('copy')}</button>` : ''}
+      </span>
+    </div>
+    <button class="ghost" data-act="add" type="button">${icon('plus')}${f.add}</button>
+    <input class="secinput" type="text" autocomplete="off" autocapitalize="off" spellcheck="false"
+           maxlength="${FIELD_MAX}" placeholder="${f.place}" aria-label="${f.label}" hidden>
+    <div class="val"></div>`;
+  }
+
+  mount(){
+    this.key = this.getAttribute('key');
+    this.input = this.$('.secinput');
+    this.$('[data-act=add]').addEventListener('click', () => this.open());
+    this.$('[data-act=edit]').addEventListener('click', () =>
+      store.editing === this.key ? this.input.blur() : this.open());
+    this.$('[data-act=copy]')?.addEventListener('click', () =>
+      copy(store[this.key], FIELDS[this.key].copied));
+
+    this.input.addEventListener('blur', () => this.close());
+    this.input.addEventListener('keydown', e => { if (e.key === 'Enter') this.input.blur(); });
+  }
+
+  open(){
+    store.patch({ editing: this.key });
+    this.input.value = store[this.key];
+    this.input.focus();
+  }
+
+  close(){
+    if (store.editing !== this.key) return;
+    store.patch({ editing: '' });
+    store.setField(this.key, this.input.value.trim());
+  }
+
+  update(s){
+    const locked = !s.unlocked, val = s[this.key], editing = s.editing === this.key;
+    this.classList.toggle('locked', locked);
+
+    this.$('[data-act=add]').hidden = locked || editing || !!val;
+    const cp = this.$('[data-act=copy]');
+    if (cp) cp.hidden = locked || !val;
+    this.input.hidden = locked || !editing;
+    /* Locked, the row is the mask and nothing else — same shape whether or not
+       this link ever carried the field. */
+    this.$('.val').hidden = locked ? false : (editing || !val);
+    this.$('.val').textContent = locked ? MASK_FIELD : val;
+    this.$('[data-act=edit] svg').style.transform = editing ? 'rotate(180deg)' : '';
   }
 }
 
@@ -932,7 +1108,7 @@ class PLTotp extends PLElement {
     this.input = this.$('.secinput');
     this.$('[data-act=add]').addEventListener('click', () => this.open());
     this.$('[data-act=edit]').addEventListener('click', () =>
-      store.editing ? this.input.blur() : this.open());
+      store.editing === 'secret' ? this.input.blur() : this.open());
     this.$('[data-act=copy]').addEventListener('click', () => this.copyCode());
 
     /* A valid Base32 prefix is still valid Base32 — "NEUT" parses fine — so no
@@ -947,15 +1123,15 @@ class PLTotp extends PLElement {
   disconnectedCallback(){ clearInterval(this.ticker); super.disconnectedCallback(); }
 
   open(){
-    store.patch({ editing: true });
+    store.patch({ editing: 'secret' });
     this.input.value = store.secret;
     this.input.focus();
   }
 
   close(){
-    if (!store.editing) return;
-    store.patch({ editing: false });
-    store.setSecret(this.input.value.trim());
+    if (store.editing !== 'secret') return;
+    store.patch({ editing: '' });
+    store.setField('secret', this.input.value.trim());
   }
 
   async copyCode(){
@@ -964,16 +1140,16 @@ class PLTotp extends PLElement {
   }
 
   update(s){
-    const locked = !s.unlocked;
+    const locked = !s.unlocked, editing = s.editing === 'secret';
     this.classList.toggle('locked', locked);
 
     /* Locked, the row is only ever the masked code — never the ghost button or
        the input, so the shape on screen is the same in both directions. */
-    this.$('[data-act=add]').hidden   = locked || s.editing || !!s.secret;
+    this.$('[data-act=add]').hidden   = locked || editing || !!s.secret;
     this.$('[data-act=copy]').hidden  = locked || !s.secret;
-    this.input.hidden                 = locked || !s.editing;
-    this.$('[data-part=code]').hidden = locked ? false : (s.editing || !s.secret);
-    this.$('[data-act=edit] svg').style.transform = s.editing ? 'rotate(180deg)' : '';
+    this.input.hidden                 = locked || !editing;
+    this.$('[data-part=code]').hidden = locked ? false : (editing || !s.secret);
+    this.$('[data-act=edit] svg').style.transform = editing ? 'rotate(180deg)' : '';
 
     if (locked){
       this.$('.code').className = 'code';   // tick() bails while locked, so set the mask here
@@ -983,7 +1159,9 @@ class PLTotp extends PLElement {
   }
 
   async tick(){
-    if (!store.unlocked || !store.secret || store.editing) return;
+    /* Only its own editor stops the ticker — while a neighbouring row is being
+       typed into, this code is still on screen and still has to count down. */
+    if (!store.unlocked || !store.secret || store.editing === 'secret') return;
     const rem = 30 - Math.floor(Date.now() / 1000 % 30);
     const code = this.$('.code');
     try {
@@ -1168,8 +1346,15 @@ class PLActions extends PLElement {
   }
 
   update(s){
-    /* Nothing to copy and nothing to encode are the same condition. */
-    this.$('.primary').disabled = this.btn.disabled = !s.blob;
+    this.$('.primary').disabled = !s.blob;
+    /* Copying and encoding stopped being the same condition once the two typed
+       fields arrived: a long enough record outgrows a version 20 symbol, and
+       QR.build answers that by throwing. Asked here instead, on the length
+       alone, because the throw would land inside a store subscriber — and one
+       subscriber throwing aborts the loop over the rest, leaving every
+       component after this one unrendered. The link itself is unaffected and
+       stays copyable; only the QR is out of reach. */
+    this.btn.disabled = !s.blob || href(s.blob).length > QR.LIMIT;
     /* Clear while the bar is armed leaves nothing to confirm. */
     if (this.armed && !s.blob) this.disarm();
     if (s.qr && s.blob){
@@ -1230,9 +1415,13 @@ class PLSheet extends PLElement {
       <h2>ENCRYPTED STRING</h2>
       <div class="blob"></div>
       <h2>HOW IT WORKS</h2>
-      <p>A generated password and a 2FA secret are encrypted into the string above and parked
-      after the <code>#</code> in the URL, where browsers never send it to a server.
-      Nothing is kept here — you keep the link.</p>
+      <p>A service name, an account, a generated password and a 2FA secret are encrypted into
+      the string above and parked after the <code>#</code> in the URL, where browsers never
+      send it to a server. Nothing is kept here — you keep the link.</p>
+      <p>All four are inside the encryption, the service name included: a locked link looks
+      the same whether it holds one field or all of them. The page title stays
+      <em>Passlink</em> for the same reason — a tab name reaches the browser history and
+      every screenshot.</p>
       <p>The master password is all that protects it. Anyone holding the string can guess at it
       offline, forever, with no rate limit and no way to revoke: if it leaks, change the
       password at the site itself. Make it long.</p>
@@ -1261,6 +1450,7 @@ class PLSheet extends PLElement {
 }
 
 customElements.define('pl-gate', PLGate);
+customElements.define('pl-field', PLField);
 customElements.define('pl-password', PLPassword);
 customElements.define('pl-totp', PLTotp);
 customElements.define('pl-status', PLStatus);
