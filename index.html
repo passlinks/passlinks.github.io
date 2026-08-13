@@ -1068,18 +1068,37 @@ class PLPassword extends PLElement {
     <div class="rowhead">
       <span class="lab">PASSWORD</span>
       <span class="acts">
+        <button class="iconbtn" data-act="peek" type="button" aria-label="Show password">${icon('eye')}</button>
         <button class="iconbtn" data-act="copy" type="button" aria-label="Copy password">${icon('copy')}</button>
       </span>
     </div>
     <div class="val"></div>`; }
 
   mount(){
+    /* Covered until asked for. The copy button already carries the password to
+       where it is going, so the plain text on screen is the one part of this row
+       nobody needs by default — and it is the part a shoulder or a screenshot
+       takes for free. */
+    this.shown = false;
+    /* Scoped to its own button: the copy icon is a sibling 'use'. */
+    this.eye = this.$('[data-act=peek] use');
+    this.$('[data-act=peek]').addEventListener('click', () => this.peek());
     this.$('[data-act=copy]').addEventListener('click', () => copy(store.pw, 'Password copied'));
   }
 
+  peek(){ this.shown = !this.shown; this.update(store); }
+
   update(s){
     this.classList.toggle('locked', !s.unlocked);
-    this.$('.val').textContent = s.unlocked ? s.pw : MASK_PW;
+    /* Locking re-covers it. A password revealed for the last link must not
+       still be on screen behind the next one. */
+    if (!s.unlocked) this.shown = false;
+    /* Dots either way, and always PW_LEN of them, so covering and uncovering
+       swaps characters in place and never moves the row. */
+    this.$('.val').textContent = s.unlocked && this.shown ? s.pw : MASK_PW;
+    this.eye.setAttribute('href', this.shown ? '#s-eyeoff' : '#s-eye');
+    this.$('[data-act=peek]').setAttribute('aria-label',
+      this.shown ? 'Hide password' : 'Show password');
   }
 }
 
